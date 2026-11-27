@@ -1,0 +1,120 @@
+/* Planillas — estética de planilla (verde, grilla fina). Sin color-mix ni :has (WebView de Android 5/6). */
+:root {
+  --verde: #1E7B4F;
+  --verde-claro: #E3F2E9;
+  --verde-medio: #C6E8D4;
+  --linea: #D9D9D9;
+  --encab: #F3F3F3;
+  --encab-borde: #C8C8C8;
+  --texto: #1F1F1F;
+  --texto-2: #5F6368;
+  --fondo: #FFFFFF;
+  --celda-w: 96px;
+  --celda-h: 28px;
+  --num-w: 44px;
+}
+[hidden] { display: none !important; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--texto);
+  background: var(--fondo);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+#app { display: flex; flex-direction: column; height: 100%; height: 100dvh; }
+button { font: inherit; cursor: pointer; }
+
+/* Barra superior */
+.appbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top));
+  background: var(--verde); color: #fff; min-height: 48px; flex: none;
+}
+.appbar-icon { border-radius: 6px; background: #fff; }
+.appbar-title { font-size: 18px; font-weight: 600; margin: 0; }
+.spacer { flex: 1; }
+.version-chip {
+  border: 1px solid rgba(255,255,255,.6); background: transparent; color: #fff;
+  border-radius: 12px; padding: 2px 8px; font-size: 12px;
+}
+.draft-label { font-size: 12px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.update-banner {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: #FFF4CE; color: #3D3000; font-size: 14px; flex: none;
+}
+.update-banner span { flex: 1; }
+.text-btn { border: 0; background: transparent; color: var(--verde); font-weight: 600; padding: 6px 10px; border-radius: 6px; }
+.text-btn:active { background: var(--verde-claro); }
+
+/* Barra de fórmula */
+.formula-bar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border-bottom: 1px solid var(--encab-borde); background: #fff; flex: none;
+}
+.name-box {
+  width: 64px; flex: none; font: 600 14px/1 system-ui, sans-serif; text-align: center;
+  padding: 6px 4px; border: 1px solid var(--encab-borde); border-radius: 4px; text-transform: uppercase;
+}
+.fx { color: var(--texto-2); font-style: italic; font-family: Georgia, serif; flex: none; }
+.formula {
+  flex: 1; min-width: 0; font-size: 16px; padding: 6px 8px;
+  border: 1px solid var(--encab-borde); border-radius: 4px;
+}
+.formula:focus, .name-box:focus { outline: 2px solid var(--verde); outline-offset: -1px; border-color: var(--verde); }
+
+/* Grilla */
+.grid-wrap { flex: 1; overflow: auto; position: relative; outline: none; -webkit-overflow-scrolling: touch; }
+.grid { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 14px; }
+.grid th, .grid td {
+  height: var(--celda-h); padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-right: 1px solid var(--linea); border-bottom: 1px solid var(--linea);
+}
+.grid td { width: var(--celda-w); min-width: var(--celda-w); max-width: var(--celda-w); background: #fff; }
+.grid td.num { text-align: right; }
+.grid thead th {
+  position: -webkit-sticky; position: sticky; top: 0; z-index: 2;
+  background: var(--encab); color: var(--texto-2); font-weight: 500; text-align: center;
+  border-bottom-color: var(--encab-borde); width: var(--celda-w); min-width: var(--celda-w);
+}
+.grid tbody th {
+  position: -webkit-sticky; position: sticky; left: 0; z-index: 1;
+  background: var(--encab); color: var(--texto-2); font-weight: 500; text-align: center;
+  width: var(--num-w); min-width: var(--num-w); max-width: var(--num-w); border-right-color: var(--encab-borde);
+}
+.grid thead th.corner { left: 0; z-index: 3; width: var(--num-w); min-width: var(--num-w); max-width: var(--num-w); }
+.grid th.on { background: var(--verde-medio); color: var(--verde); font-weight: 700; }
+.grid td.sel { box-shadow: inset 0 0 0 2px var(--verde); background: #fff; }
+.grid td.sel.editing { box-shadow: inset 0 0 0 2px var(--verde), inset 0 0 0 4px var(--verde-claro); }
+
+/* Barra inferior */
+.bottombar {
+  display: flex; gap: 6px; padding: 6px 8px; padding-bottom: max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--encab-borde); background: var(--encab); flex: none; overflow-x: auto;
+}
+.kb-open .bottombar { display: none; }
+.tool {
+  flex: none; border: 1px solid var(--encab-borde); background: #fff; color: var(--texto);
+  border-radius: 6px; padding: 8px 12px; font-size: 14px;
+}
+.tool:active { background: var(--verde-claro); border-color: var(--verde); }
+
+/* Diálogo y aviso */
+.scrim { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.35); z-index: 10; }
+.dialog {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 11;
+  width: calc(100% - 32px); max-width: 420px; max-height: calc(100% - 32px); overflow: auto;
+  background: #fff; border-radius: 12px; padding: 18px 20px 8px; box-shadow: 0 8px 32px rgba(0,0,0,.25);
+}
+.dialog-title { margin: 0 0 8px; font-size: 18px; }
+.dialog-body p { margin: 6px 0; line-height: 1.45; font-size: 14px; }
+.dialog-body a { color: var(--verde); }
+.dialog-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.snackbar {
+  position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%) translateY(20px);
+  background: #323232; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 14px;
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 12; max-width: calc(100% - 32px);
+}
+.snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }

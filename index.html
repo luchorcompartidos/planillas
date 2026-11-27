@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="app-version" content="v__APP_VERSION__">
+  <meta name="theme-color" content="#1E7B4F">
+  <title>Planillas</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+</head>
+<body>
+  <div id="app">
+    <header class="appbar">
+      <img class="appbar-icon" src="./icon.svg" alt="" width="28" height="28">
+      <h1 class="appbar-title">Planillas</h1>
+      <button class="version-chip" id="btn-version" type="button" aria-label="Versión y cambios">v__APP_VERSION__</button>
+      <span class="spacer"></span>
+      <span class="draft-label" id="draft-label">Borrador local</span>
+    </header>
+    <div class="update-banner" id="update-banner" hidden>
+      <span id="update-text">Hay una versión nueva.</span>
+      <button class="text-btn" id="update-action" type="button">Recargar</button>
+    </div>
+    <div class="formula-bar">
+      <input id="name-box" class="name-box" type="text" value="A1" aria-label="Celda (escribí una referencia, ej. B12, y Enter)" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go">
+      <span class="fx" aria-hidden="true">fx</span>
+      <input id="formula" class="formula" type="text" aria-label="Contenido de la celda" autocomplete="off" spellcheck="false" enterkeyhint="done" placeholder="Tocá una celda y escribí acá">
+    </div>
+    <main class="grid-wrap" id="grid-wrap" tabindex="0" aria-label="Planilla">
+      <table class="grid" id="grid"></table>
+    </main>
+    <nav class="bottombar" aria-label="Acciones">
+      <button class="tool" id="btn-add-row" type="button">+ Fila</button>
+      <button class="tool" id="btn-add-col" type="button">+ Columna</button>
+      <button class="tool" id="btn-clear" type="button">Borrar celda</button>
+    </nav>
+  </div>
+
+  <div id="scrim" class="scrim" hidden></div>
+  <div id="dialog" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
+    <h2 class="dialog-title" id="dialog-title"></h2>
+    <div class="dialog-body" id="dialog-body"></div>
+    <div class="dialog-actions"><button class="text-btn" id="dialog-close" type="button">Cerrar</button></div>
+  </div>
+  <div id="snackbar" class="snackbar" role="status" aria-live="polite"></div>
+
+  <!-- WebView o navegador demasiado viejo (por ejemplo, Android 5/6 sin actualizar "Android System WebView"):
+       en vez de una pantalla en blanco, se muestra cómo arreglarlo. Escrito en JavaScript viejo (ES5) a propósito. -->
+  <script>
+  (function () {
+    var ok = false;
+    try { ok = new Function('class A { static { this.x = 1; } } return [1, 2].at(-1) === 2 && A.x === 1 && typeof Object.hasOwn === "function";')(); } catch (e) { ok = false; }
+    if (ok) return;
+    var ua = navigator.userAgent, m = /Chrome\/(\d+)/.exec(ua), a = /Android ([\d.]+)/.exec(ua);
+    var ver = m ? m[1] : '?';
+    var android = !!a;
+    var store = 'https://play.google.com/store/apps/details?id=com.google.android.webview';
+    document.getElementById('app').style.display = 'none';
+    var d = document.createElement('div');
+    d.setAttribute('style', 'font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;line-height:1.5;color:#1F1F1F;background:#FFFFFF;min-height:100vh;box-sizing:border-box');
+    d.innerHTML = '<h1 style="font-size:22px;margin:0 0 12px;color:#1E7B4F">Planillas</h1>' +
+      (android
+        ? '<p>Este equipo tiene una versión vieja de <b>Android System WebView</b> (Chromium ' + ver + ') y la app no puede abrir.</p>' +
+          '<p>Actualizala desde Play Store y volvé a abrir Planillas Hace falta la versión <b>94 o más</b> (en Android 5 la última es la 95; en Android 6, la 106).</p>' +
+          '<p><a href="' + store + '" style="display:inline-block;padding:10px 20px;border-radius:20px;background:#1E7B4F;color:#fff;text-decoration:none">Abrir en Play Store</a></p>' +
+          '<p style="font-size:13px;color:#555">Android ' + a[1] + ' · WebView ' + ver + '</p>'
+        : '<p>Este navegador es demasiado viejo para Planillas Actualizalo (o usá Chrome, Edge o Firefox actuales) y volvé a entrar.</p>');
+    document.body.appendChild(d);
+  })();
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

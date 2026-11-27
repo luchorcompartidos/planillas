@@ -1,1 +1,11 @@
-# planillas
+# Planillas
+
+Planillas tipo Excel pensadas primero para el celular: web + Android (Capacitor, un solo código) y, más adelante, Windows.
+
+- Web: https://luchorcompartidos.github.io/planillas/
+- APK: en [Releases](https://github.com/luchorcompartidos/planillas/releases) (un solo APK universal, Android 5.0 o más).
+- Estado y plan: [DESARROLLO.md](DESARROLLO.md).
+
+| Versión | Contenido |
+|---|---|
+| v0.0.1 | Etapa 1a: esqueleto (Vite + Capacitor 7, CI con web y APK, mínimo Android 5.0) y grilla básica con borrador local |

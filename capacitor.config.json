@@ -1,0 +1,13 @@
+{
+  "appId": "io.github.luchorcompartidos.planillas",
+  "appName": "Planillas",
+  "webDir": "dist",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "force"
+  },
+  "plugins": {
+    "Keyboard": {
+      "resizeOnFullScreen": true
+    }
+  }
+}

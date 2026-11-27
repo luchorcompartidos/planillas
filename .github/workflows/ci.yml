@@ -1,0 +1,239 @@
+# Publica la web en GitHub Pages y compila el APK en cada push a main.
+# Versión (SemVer): poné [patch], [minor] o [major] en el mensaje del commit para crear una Release.
+# Sin marca: se publica la web y se compila un APK de prueba (artefacto), pero NO se crea Release.
+# Un push que solo cambia archivos .md (DESARROLLO.md, README.md) no corre este CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Un push que solo cambia documentos (.md) no corre el CI: no hace falta
+    # publicar la web ni compilar el APK. Si hace falta, usar "Run workflow".
+    paths-ignore:
+      - '**.md'
+      - 'pruebas/**'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Tipo de Release"
+        type: choice
+        options: [ninguna, patch, minor, major]
+        default: ninguna
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ci-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        name: Calcular versión desde los tags
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+          BUMP_IN: ${{ github.event.inputs.bump }}
+          LINK: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/ci.yml
+        run: |
+          last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          [ -z "$last" ] && last="v0.0.0"
+          IFS=. read -r MA MI PA <<< "${last#v}"
+          bump=""
+          case "$MSG" in
+            *"[skip release]"*) bump="" ;;
+            *"[major]"*) bump=major ;;
+            *"[minor]"*) bump=minor ;;
+            *"[patch]"*) bump=patch ;;
+          esac
+          if [ -n "$BUMP_IN" ] && [ "$BUMP_IN" != "ninguna" ]; then bump="$BUMP_IN"; fi
+          case "$bump" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          if [ -n "$bump" ]; then
+            echo "version=$MA.$MI.$PA" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release nueva: v$MA.$MI.$PA ($bump)"
+          else
+            echo "version=$MA.$MI.$PA-prueba" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Sin Release::El commit no tiene [patch], [minor] ni [major]. Se publica la web y se compila un APK de prueba, pero no se crea Release. Para crearla, usá 'Run workflow' y elegí el tipo."
+            {
+              echo "## ⚠️ Push sin Release"
+              echo
+              echo "No se creó tag ni Release. La web se publica igual y el APK de prueba queda en *Artifacts*."
+              echo
+              echo "**¿Preferís crear una versión de este cambio?** Entrá a [CI]($LINK), tocá **Run workflow** y elegí el tipo (patch, minor o major)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  web:
+    needs: version
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_APP_VERSION: ${{ needs.version.outputs.version }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      PLANILLAS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      PLANILLAS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_APP_VERSION: ${{ env.VERSION }}
+      - name: Generar proyecto Android
+        run: npx cap add android
+      - name: Ajustes Android (versión y teclado)
+        run: |
+          IFS=. read -r MA MI PA <<< "${VERSION%%-*}"
+          CODE=$((MA*10000 + MI*100 + PA)); [ "$CODE" -lt 1 ] && CODE=1
+          sed -i -E "s/versionCode [0-9]+/versionCode $CODE/; s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q windowSoftInputMode "$MANIFEST" || sed -i 's/android:launchMode="singleTask"/android:launchMode="singleTask" android:windowSoftInputMode="adjustResize"/' "$MANIFEST"
+          grep -n "versionCode\|versionName" android/app/build.gradle
+      - name: Ícono, atrapador de cierres y arreglo de status-bar para Android 5
+        run: python3 android-extra/patch-android.py
+      - name: Mínimo Android 5.0 (API 21) para tablets viejas
+        run: |
+          # Un solo APK para todos: Capacitor 7 y sus plugins toman el mínimo de variables.gradle (por defecto 23 = Android 6)
+          sed -i -E 's/minSdkVersion = [0-9]+/minSdkVersion = 21/' android/variables.gradle
+          grep -q "minSdkVersion = 21" android/variables.gradle || { echo "::error::No se pudo bajar minSdkVersion a 21"; exit 1; }
+          # Cordova (puente de Capacitor; Planillas no usa plugins de Cordova) declara API 22: se acepta igual con overrideLibrary
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          grep -q 'xmlns:tools' "$MANIFEST" || sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android"#<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"#' "$MANIFEST"
+          sed -i '0,/<application/s#<application#<uses-sdk tools:overrideLibrary="org.apache.cordova" />\n    <application#' "$MANIFEST"
+          grep -q 'overrideLibrary="org.apache.cordova"' "$MANIFEST" && grep -q 'xmlns:tools' "$MANIFEST" || { echo "::error::No se pudo agregar overrideLibrary"; exit 1; }
+          head -5 "$MANIFEST"
+          grep -n "SdkVersion\|Version =" android/variables.gradle
+      - name: Firma fija del APK
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning title=Sin firma fija::No están los Secrets de la clave de firma; se compila con firma de prueba."
+            exit 0
+          fi
+          printf "%s" "$KEYSTORE_B64" | tr -d " \r\n" | base64 -d > "$RUNNER_TEMP/planillas-release.jks"
+          echo "PLANILLAS_KEYSTORE_PATH=$RUNNER_TEMP/planillas-release.jks" >> "$GITHUB_ENV"
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          // Firma fija (la clave llega desde los Secrets del repo)
+          def planillasKeystore = System.getenv("PLANILLAS_KEYSTORE_PATH")
+          if (planillasKeystore) {
+              android {
+                  signingConfigs {
+                      planillas {
+                          storeFile file(planillasKeystore)
+                          storePassword System.getenv("PLANILLAS_KEYSTORE_PASSWORD")
+                          keyAlias System.getenv("PLANILLAS_KEY_ALIAS")
+                          keyPassword System.getenv("PLANILLAS_KEYSTORE_PASSWORD")
+                      }
+                  }
+                  buildTypes {
+                      release { signingConfig signingConfigs.planillas }
+                      debug { signingConfig signingConfigs.planillas }
+                  }
+              }
+          }
+          GRADLE
+      - run: npx cap sync android
+      - name: Compilar APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -n "$PLANILLAS_KEYSTORE_PATH" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          fi
+      - name: Bibliotecas que piden más que Android 5.0 (solo si falló)
+        if: failure()
+        run: |
+          find ~/.gradle/caches -name "*.aar" | while read -r f; do
+            m=$(unzip -p "$f" AndroidManifest.xml 2>/dev/null | grep -o 'minSdkVersion="[0-9]*"' | grep -o '[0-9]\+')
+            [ -n "$m" ] && [ "$m" -gt 21 ] && echo "::warning::minSdk $m: $(basename "$f")"
+          done | sort -u
+      - name: Renombrar APK
+        run: |
+          mkdir -p out
+          if [ -n "$PLANILLAS_KEYSTORE_PATH" ]; then
+            APK=android/app/build/outputs/apk/release/app-release.apk
+          else
+            APK=android/app/build/outputs/apk/debug/app-debug.apk
+          fi
+          cp "$APK" "out/planillas-v${VERSION}.apk"
+          # Verificar la huella de la firma (debe coincidir con la SHA-1 cargada en Firebase)
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs "out/planillas-v${VERSION}.apk" | grep -i "SHA-1" || true
+      - name: Verificar mínimo de Android en el APK
+        run: |
+          AAPT="$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/aapt
+          "$AAPT" dump badging "out/planillas-v${VERSION}.apk" | grep -E "sdkVersion|native-code" || true
+          "$AAPT" dump badging "out/planillas-v${VERSION}.apk" | grep -q "sdkVersion:'21'" || { echo "::error::El APK no quedó con mínimo Android 5.0 (API 21)"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planillas-v${{ env.VERSION }}
+          path: out/*.apk
+      - name: Notas de la versión
+        if: needs.version.outputs.release == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/planillas-release.md" <<EOF
+          ## ¿Qué archivo bajar?
+          | Archivo | Arquitectura | Para |
+          |---|---|---|
+          | \`planillas-v${VERSION}.apk\` | universal (armeabi-v7a, arm64-v8a, x86, x86_64) | Todos: celulares y tablets con **Android 5.0 o más** |
+
+          Es un solo APK para todos los equipos (no tiene partes nativas por arquitectura).
+
+          **Tablets con Android 5 o 6:** antes de abrir Planillas, actualizá **"Android System WebView"** desde Play Store (hace falta la versión 94 o más). Si la WebView es vieja, la app muestra un aviso con un botón a Play Store. Tocando el número de versión (arriba) se ve la versión de Android y de la WebView del equipo.
+
+          EOF
+          echo "PLANILLAS_RELEASE_BODY=$RUNNER_TEMP/planillas-release.md" >> "$GITHUB_ENV"
+      - name: Crear Release
+        if: needs.version.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          body_path: ${{ env.PLANILLAS_RELEASE_BODY }}
+          generate_release_notes: true
+          files: out/*.apk
