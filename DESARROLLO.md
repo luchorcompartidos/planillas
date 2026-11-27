@@ -56,7 +56,7 @@
 - [ ] Compartir planillas con otras personas (como las notas compartidas): ¿sí, y en qué etapa?
 - [ ] Límite de filas/columnas razonable para el plan gratuito de Firebase y para las tablets. Hoy la grilla dibuja todas las celdas (50 × 12 al empezar; el cuadro de nombre llega hasta la fila 10000 y la columna ZZ): con muchas filas hará falta dibujar solo lo visible (Etapa 1b o 3).
 - [ ] Maven Central devuelve 429 a veces al compilar el APK (pasó en la v0.0.2): evaluar un reintento automático de `./gradlew` en `ci.yml` (por ahora se resuelve con *Re-run failed jobs*).
-- [ ] Llevar a `notas` (y a la plantilla del repo home, si se arma una de `ci.yml`) el arreglo de `deploy-pages` de la v0.0.2: nombre de paquete por intento + reintento. Lo pide el usuario cuando quiera.
+- [x] Arreglo de `deploy-pages` de la v0.0.2 llevado a `notas` (ANote... v0.4.1, 2026-11-27; anduvo a la primera) y anotado en `ESTANDAR-VERSIONES.md` del repo home.
 
 ## 6. Datos técnicos clave
 - Archivos principales: `index.html` (estructura + aviso ES5), `src/main.js` (grilla, edición, versión), `src/styles.css`, `src/native.js` (botón atrás, barra de estado, teclado), `src/version.js` (estándar de versiones), `vite.config.js` (service worker, `target: es2022`), `capacitor.config.json` (`appId` `io.github.luchorcompartidos.planillas`, nombre "Planillas"), `android-extra/` (`patch-android.py`, `java/PlanillasApp.java` + `CierreActivity.java`, `res/` con el ícono), `.github/workflows/ci.yml` y `reemplazar-version.yml`.
