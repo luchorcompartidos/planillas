@@ -14,7 +14,7 @@
 | Repo | luchorcompartidos/planillas |
 | URL publicada | https://luchorcompartidos.github.io/planillas/ |
 | Tipo | Web + Android (Capacitor, un solo código, como ANote...) + Windows (forma a definir) |
-| Estado | Prototipo (Etapa 1c publicada; Etapa 1 completa) |
+| Estado | Prototipo (Etapa 1c publicada; Etapa 1d —vista Reporte— diseñada, sin empezar) |
 | Última versión (Release) | v0.0.4 — 2026-11-27 |
 | Se conecta con | Firebase, proyecto **notas-pro-2026** (el mismo de ANote..., mismas cuentas; datos separados) |
 | Dispositivos viejos (Android 5/6) | **Sí**: aplicar `plantilla/APK-DISPOSITIVOS-VIEJOS.md` del repo home (sección 8, Capacitor) en cada cambio y, al cerrar cada etapa, revisar si lo hecho deja algo nuevo para esa guía y, si corresponde, actualizarla (sección del tema + Historial) y subirla al repo home. Meta: un solo APK universal para el celular y las dos tablets, como ANote... |
@@ -31,13 +31,25 @@
   - **Android:** `@capacitor/filesystem` **7.0.1** + `@capacitor/share` 7.0.4; exportar abre "Guardar o enviar" (Drive, Archivos, WhatsApp…), como en ANote...; importar usa el selector de archivos del sistema. En la web, descarga.
   - Probado: ida y vuelta en Node con ExcelJS real (`pruebas/xlsx`), libros hechos con openpyxl y con LibreOffice, `.xls`/`.ods` (mensaje), exportados abiertos con openpyxl y LibreOffice (PDF); app en Chrome como celular (`pruebas/app`) con el paquete de prueba **y con la web real que trae el APK de la Release** (build de Vite con la ExcelJS de npm). APK: sin `lib/` (universal), `sdkVersion:'21'`, el `grep` de funciones nuevas da 0.
 - En curso: el usuario prueba la v0.0.4 (sección 3, paso 1).
+- Después de la v0.0.4 (sin Release): diseño de la **vista Reporte** (sección 3, paso 2), elegida por el usuario. Lienzo con las 5 propuestas y la combinación: https://claude.ai/artifact/LNydGLxEuS7Crs9WZW5Hqh
 
 ## 3. Próximos pasos
 1. **Usuario:** instalar `planillas-v0.0.4.apk` (celular y, si puede, las dos tablets) y probar: ⋮ → Exportar a Excel → "Guardar o enviar" (por ejemplo a Drive) y abrirlo en Excel o Google Sheets; exportar CSV con `;` y abrirlo en Excel; Importar un `.xlsx` propio con formato (ver que se vea y leer el aviso) y un `.csv`; en Mis planillas, Importar y el ⋮ → Exportar. Si quedó pendiente, probar también lo de la v0.0.3 (menú de celda, Ficha, Mis planillas). En las tablets, ver que el selector de archivos muestre los `.xlsx` y `.csv`.
-2. **Etapa 2 — Cuenta y nube:** login de ANote... (Google + correo con contraseña propia, 2FA recomendada, seguridad de la cuenta), sincronización entre dispositivos y bloque nuevo en las reglas (ver sección 5). Usuario: registrar la app Android `io.github.luchorcompartidos.planillas` en Firebase con la misma SHA-1/SHA-256 y bajar el `google-services.json` nuevo. Ojo: el formato (`styles`, `colW`, `rowH`) también tiene que sincronizarse por celda.
-3. **Etapa 3 — Formato tipo Excel:** editar el formato que hoy solo se importa (negrita, colores, alineación, bordes, anchos/altos arrastrando), lo de las tablas de ANote... (selección de rangos, copiar/pegar, combinar, ordenar), formatos de número/fecha/moneda (mostrar `nf`), inmovilizar filas/columnas, varias hojas por archivo y tipos de columna para la Ficha. Dibujar solo lo visible si la grilla crece mucho (sección 5).
-4. **Etapa 4 — Fórmulas básicas** (ver sección 4). Al insertar/borrar filas o columnas habrá que ajustar las referencias de las fórmulas (hoy `shift()` solo mueve celdas, formato y anchos/altos). Al importar, guardar también la fórmula (hoy queda solo el resultado).
-5. **Etapa 5 — Windows** (ver sección 5).
+2. **Etapa 1d — Vista Reporte** (pedida por el usuario el 2026-11-27; antes de la Etapa 2, salvo que diga otra cosa). Tercera vista, además de Grilla y Ficha: la tabla "presentable", solo hasta la última fila y columna con datos, sin letras ni números de grilla. Diseño elegido = combinación de las propuestas 2, 3 y 5 del lienzo (ver el enlace en la sección 2; tableros "Combinada · Oscuro", "Combinada · Claro" y "Configurar vista"):
+   - **Look:** reporte con **franjas**, encabezado (fila 1) **destacado** en verde, primera columna fija al deslizar, barra de **total** abajo.
+   - **Tema oscuro por defecto**, con botón para pasar a claro (y "Sistema").
+   - **Etiquetas de color** en las columnas elegidas (un color por valor, automático y editable; neutras en la columna por la que se agrupa).
+   - **Buscador** y **filtros rápidos** (chips con los valores de una columna, por ejemplo Categoría) + ordenar por columna.
+   - **Agrupar** por una columna, con subtotales y grupos plegables.
+   - **Configurar vista** (desde el ⋮): tema, densidad (cómoda/compacta), franjas, encabezado destacado, color de acento, columnas visibles y su orden, primera columna fija, columnas como etiquetas y sus colores, buscador, columna de filtros rápidos, orden, agrupar por, subtotales, plegables, columna y cálculo del total (suma, promedio, cantidad, mínimo, máximo), barra de total, resumen arriba. "Restablecer" vuelve a lo automático.
+   - Tocar una fila abre esa fila en la Ficha.
+   - **Propuesta de división** (para no pasar del 20% por chat): **1d-1** = vista Reporte con tema oscuro/claro, franjas, encabezado, etiquetas automáticas, buscador, filtros rápidos, orden y total (estimado entre 15% y 25%); **1d-2** = agrupar con subtotales y plegables, Configurar vista completa y colores de etiquetas editables (estimado entre 15% y 20%).
+   - Datos: ajustes en el archivo (`sheet.vista = { densidad, franjas, encabezado, acento, columnas: [{ c, visible }], fijarPrimera, etiquetas: [c], colores: { valor: color }, buscador, filtroCol, orden: { c, dir }, agruparCol, subtotales, plegables, totalCol, calculo, barraTotal, resumen }`, todo opcional con valores automáticos); el tema, para toda la app (`localStorage` `planillas-tema-reporte`). Insertar/borrar columnas tiene que mover también los índices de `vista` (como hoy `shift()` con `colW`). Lo automático: columna de etiquetas/filtros = la primera columna de texto con pocos valores distintos (hasta 12); columna del total = la última columna numérica.
+   - Probar en las tablets: el tema oscuro y las franjas son solo CSS (sin `color-mix` ni `:has`).
+3. **Etapa 2 — Cuenta y nube:** login de ANote... (Google + correo con contraseña propia, 2FA recomendada, seguridad de la cuenta), sincronización entre dispositivos y bloque nuevo en las reglas (ver sección 5). Usuario: registrar la app Android `io.github.luchorcompartidos.planillas` en Firebase con la misma SHA-1/SHA-256 y bajar el `google-services.json` nuevo. Ojo: el formato (`styles`, `colW`, `rowH`) también tiene que sincronizarse por celda.
+4. **Etapa 3 — Formato tipo Excel:** editar el formato que hoy solo se importa (negrita, colores, alineación, bordes, anchos/altos arrastrando), lo de las tablas de ANote... (selección de rangos, copiar/pegar, combinar, ordenar), formatos de número/fecha/moneda (mostrar `nf`), inmovilizar filas/columnas, varias hojas por archivo y tipos de columna para la Ficha. Dibujar solo lo visible si la grilla crece mucho (sección 5).
+5. **Etapa 4 — Fórmulas básicas** (ver sección 4). Al insertar/borrar filas o columnas habrá que ajustar las referencias de las fórmulas (hoy `shift()` solo mueve celdas, formato y anchos/altos). Al importar, guardar también la fórmula (hoy queda solo el resultado).
+6. **Etapa 5 — Windows** (ver sección 5).
 
 ## 4. Decisiones tomadas
 - 2026-11-26 App nueva, exclusiva de planillas/archivos con estética tipo Excel, pensada primero para pantallas chicas. Repo `luchorcompartidos/planillas`; el nombre de la app se define después.
@@ -62,8 +74,11 @@
 - 2026-11-27 CSV: exportar en dos variantes (`;` con coma decimal / `,` con punto decimal), UTF-8 con BOM, fin de línea `\r\n`. Importar: separador detectado (`;` `,` tab `|`), UTF-8 o windows-1252 (v0.0.4).
 - 2026-11-27 Libros que ExcelJS no puede leer (por ejemplo, de openpyxl con gráficos o comentarios: rutas absolutas en los `.rels`): se reintenta con una copia sin dibujos ni comentarios y con las rutas pasadas a relativas (v0.0.4).
 
+- 2026-11-27 Vista **Reporte** (tercera vista, además de Grilla y Ficha): combinación de las propuestas 2 (franjas), 3 (etiquetas, filtros rápidos, buscador) y 5 (oscura, agrupada); oscuro por defecto con cambio a claro; todo configurable desde "Configurar vista". Va como Etapa 1d, antes de la Etapa 2 (sección 3).
+
 ## 5. Pendientes / dudas abiertas
 - [ ] Nombre de la app (y logo).
+- [ ] Vista Reporte: ¿cómo se cambia entre las tres vistas? Propuesta: el botón de arriba pasa a un selector Grilla / Reporte / Ficha (o "Ficha" sigue como botón y Grilla/Reporte en el ⋮). ¿Abrir en Reporte por defecto las planillas importadas? Confirmar al empezar la 1d.
 - [ ] **Windows:** PWA instalable desde Edge/Chrome (lo más simple; el login anda igual que en la web) vs. `.exe` con Tauri o Electron (el login con Google dentro de una ventana propia necesita un arreglo aparte). Decidir en la Etapa 5.
 - [ ] **Firebase compartido — no perjudicar a ANote...:** `directory/{uid}` (v0.4.0 de ANote...) guarda `platform` y `version` de ANote...; Planillas no debe pisarlos (campos propios o no escribir ahí). La administración de usuarios de ANote... (revocar sesiones, borrar) va a alcanzar también a Planillas: confirmar con el usuario si está bien. Cada cambio de reglas lo pega el usuario en la consola.
 - [ ] Compartir planillas con otras personas (como las notas compartidas): ¿sí, y en qué etapa?
@@ -89,6 +104,7 @@
 - v0.0.2 (2026-11-27) — CI: `deploy-pages` con nombre de paquete por intento y reintento automático. Web publicada; Release creada relanzando el APK (429 de Maven). Instalada y abierta OK.
 - v0.0.3 (2026-11-27) — Etapa 1b: menú de celda (insertar/borrar filas y columnas en el medio, con Deshacer), vista Ficha, Mis planillas en IndexedDB (nueva, abrir, renombrar, duplicar, borrar; migra el borrador). CI: reintento de Gradle por el 429 de Maven.
 - v0.0.4 (2026-11-27) — Etapa 1c: exportar `.xlsx` (con formato) y `.csv` (`;` o `,`), importar `.xlsx`/`.csv` como planillas nuevas con aviso de lo que se pierde, formato importado visible en la grilla, menú ⋮ del archivo, "Guardar o enviar" en Android (`@capacitor/filesystem` 7.0.1 + `@capacitor/share`). Cierra la Etapa 1. CI y APK a la primera.
+- 2026-11-27 — Sin Release: diseño de la vista Reporte (lienzo con 5 propuestas, la combinación elegida y Configurar vista). Planificada como Etapa 1d.
 
 ---
 *Al cerrar cada sesión: actualizar secciones 1, 2, 3 y 7, y subir el archivo al repo. "Dispositivos viejos" es **Sí**: revisar también `plantilla/APK-DISPOSITIVOS-VIEJOS.md` (repo home) y actualizarla si corresponde.*
