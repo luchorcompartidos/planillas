@@ -37,11 +37,12 @@ button { font: inherit; cursor: pointer; }
 .spacer { flex: 1; }
 .version-chip {
   border: 1px solid rgba(255,255,255,.6); background: transparent; color: #fff;
-  border-radius: 12px; padding: 2px 8px; font-size: 12px;
+  border-radius: 12px; padding: 2px 8px; font-size: 12px; white-space: nowrap; flex: none;
 }
 .icon-btn { border: 0; background: transparent; color: inherit; padding: 4px; border-radius: 8px; line-height: 0; flex: none; }
 .icon-btn:active { background: rgba(255,255,255,.18); }
 .icon-btn.back { font-size: 22px; line-height: 1; padding: 4px 8px; }
+.icon-btn.more { font-size: 22px; line-height: 1; padding: 4px 6px; margin-right: -4px; font-weight: 700; }
 .file-title {
   border: 0; background: transparent; color: #fff; font-size: 17px; font-weight: 600; padding: 4px 6px; border-radius: 6px;
   min-width: 0; max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
@@ -180,3 +181,8 @@ button { font: inherit; cursor: pointer; }
 .snackbar { display: flex; align-items: center; gap: 12px; }
 .snackbar.has-action.show { pointer-events: auto; }
 .snack-btn { border: 0; background: transparent; color: #8BE0AE; font-weight: 700; padding: 4px 6px; flex: none; }
+
+/* Aviso de importación */
+.dialog-body ul { margin: 4px 0 10px; padding-left: 20px; }
+.dialog-body li { margin: 3px 0; }
+.dialog-error { color: #B3261E; }

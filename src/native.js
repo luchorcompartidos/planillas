@@ -36,3 +36,33 @@ export function deviceInfo() {
   if (!android) return '';
   return `Android ${android}${chrome ? ` · ${isNative ? 'WebView' : 'Chrome'} ${chrome}` : ''}`;
 }
+
+// Entregar un archivo exportado: en la web se descarga; en Android se guarda en el caché de la app y se abre
+// "Guardar o enviar" (Drive, Archivos, WhatsApp, correo…), como en ANote... Devuelve 'downloaded', 'shared' o 'cancel'.
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(blob);
+});
+export async function deliverFile(filename, blob) {
+  if (isNative) {
+    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    const { Share } = await import('@capacitor/share');
+    const res = await Filesystem.writeFile({ path: filename, data: await blobToBase64(blob), directory: Directory.Cache });
+    try {
+      await Share.share({ title: filename, dialogTitle: 'Guardar o enviar', files: [res.uri] });
+    } catch (e) {
+      if (/cancel/i.test(e?.message || '')) return 'cancel';
+      throw e;
+    }
+    return 'shared';
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  return 'downloaded';
+}

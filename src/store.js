@@ -1,6 +1,7 @@
 // Archivos (planillas) guardados en este dispositivo: IndexedDB, con respaldo en localStorage
 // si IndexedDB no está disponible (modo privado de algunos navegadores).
-// Archivo = { id, name, created, updated, rows, cols, cells: { "A1": "texto" } }
+// Archivo = { id, name, created, updated, rows, cols, cells: { "A1": "texto" }, styles, colW, rowH }
+// (styles/colW/rowH desde la v0.0.4: formato traído al importar .xlsx; detalle en transfer.js)
 
 const DB_NAME = 'planillas';
 const STORE = 'files';

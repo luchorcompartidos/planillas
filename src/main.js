@@ -1,10 +1,13 @@
-// Planillas — Etapa 1b: grilla completa, vista Ficha y lista de archivos (sin cuenta todavía).
+// Planillas — Etapa 1c: importar y exportar .xlsx y .csv (sobre la grilla, la Ficha y los archivos de la 1b).
 // Grilla: tocar para seleccionar y otra vez para editar en la barra de fórmula; insertar y borrar
 // filas/columnas en el medio (menú de celda: mantener apretado, clic derecho o "Más…").
 // Ficha: un registro por pantalla (fila 1 = nombres de campo). Archivos guardados en IndexedDB.
+// Formato (de lo importado): negrita, colores, alineación, bordes, anchos y altos; todavía no se edita.
 import './styles.css';
 import { APP_VERSION, CHANGELOG_URL, getLatestRelease, isNewer, formatDate } from './version.js';
-import { initNative, isNative, setStatusBar, minimizeApp, deviceInfo } from './native.js';
+import { initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile } from './native.js';
+import { colName, parseRef, ref, isNum } from './refs.js';
+import { importAny, ImportError, toXlsx, toCsv, safeName } from './transfer.js';
 import {
   listFiles, getFile, putFile, deleteFile, newId, savePending, clearPending, recoverPending, storageKind,
 } from './store.js';
@@ -24,7 +27,9 @@ const ficha = $('ficha');
 const fields = $('ficha-fields');
 
 // ---------- Modelo ----------
-// sheet = archivo abierto = { id, name, created, updated, rows, cols, cells: { "A1": "texto" } }
+// sheet = archivo abierto = { id, name, created, updated, rows, cols, cells: { "A1": "texto" },
+//   styles: { "A1": { b, i, fc, bg, ha, bd, nf, … } }, colW: { 0: ancho Excel }, rowH: { 0: alto en puntos } }
+// (detalle del formato en transfer.js)
 let sheet = null;
 let sel = { r: 0, c: 0 };
 let editing = false;
@@ -33,27 +38,12 @@ let release = null;
 let view = 'tabla';
 let rec = 1; // fila (índice desde 0) del registro que muestra la Ficha; la fila 0 son los nombres de campo
 
-export function colName(c) {
-  let s = '';
-  let n = c + 1;
-  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
-  return s;
-}
-export function parseRef(text) {
-  const m = /^\s*([A-Za-z]{1,3})\s*(\d{1,6})\s*$/.exec(text || '');
-  if (!m) return null;
-  let c = 0;
-  for (const ch of m[1].toUpperCase()) c = c * 26 + (ch.charCodeAt(0) - 64);
-  return { r: parseInt(m[2], 10) - 1, c: c - 1 };
-}
-const ref = (r, c) => colName(c) + (r + 1);
 const getCell = (r, c) => sheet.cells[ref(r, c)] || '';
 function setCell(r, c, v) {
   const k = ref(r, c);
   if (v === '' || v == null) delete sheet.cells[k]; else sheet.cells[k] = v;
   save();
 }
-const isNum = (v) => v !== '' && /^[-+]?(\d+([.,]\d*)?|[.,]\d+)(e[-+]?\d+)?%?$/i.test(String(v).trim());
 const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 // Última fila y columna con datos (-1 si la planilla está vacía)
@@ -98,7 +88,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) onLea
 
 // Deshacer la última operación grande (insertar/borrar filas o columnas, borrar registro)
 let undoSnap = null;
-function snapshot() { return JSON.stringify({ rows: sheet.rows, cols: sheet.cols, cells: sheet.cells }); }
+function snapshot() {
+  return JSON.stringify({ rows: sheet.rows, cols: sheet.cols, cells: sheet.cells, styles: sheet.styles, colW: sheet.colW, rowH: sheet.rowH });
+}
 function withUndo(text, fn) {
   commit();
   const snap = snapshot();
@@ -118,17 +110,28 @@ function withUndo(text, fn) {
 // ---------- Filas y columnas en el medio ----------
 // Inserta (delta +1) o borra (delta -1) en la posición "at" del eje 'r' (filas) o 'c' (columnas).
 // Al borrar, el tamaño de la grilla no cambia (como en Excel); al insertar crece en uno.
+// El contenido, el formato y los anchos/altos se mueven juntos.
 function shift(axis, at, delta) {
-  const out = {};
-  for (const [k, v] of Object.entries(sheet.cells)) {
-    const p = parseRef(k);
-    if (!p) continue;
-    let x = axis === 'r' ? p.r : p.c;
-    if (delta < 0 && x === at) continue;
-    if (delta > 0 ? x >= at : x > at) x += delta;
-    out[axis === 'r' ? ref(x, p.c) : ref(p.r, x)] = v;
-  }
-  sheet.cells = out;
+  const move = (x) => (delta < 0 && x === at ? null : (delta > 0 ? x >= at : x > at) ? x + delta : x);
+  const byCell = (obj) => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      const p = parseRef(k);
+      if (!p) continue;
+      const x = move(axis === 'r' ? p.r : p.c);
+      if (x == null) continue;
+      out[axis === 'r' ? ref(x, p.c) : ref(p.r, x)] = v;
+    }
+    return out;
+  };
+  const byIndex = (obj) => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) { const x = move(+k); if (x != null) out[x] = v; }
+    return out;
+  };
+  sheet.cells = byCell(sheet.cells);
+  sheet.styles = byCell(sheet.styles);
+  if (axis === 'r') sheet.rowH = byIndex(sheet.rowH); else sheet.colW = byIndex(sheet.colW);
   if (delta > 0) { if (axis === 'r') sheet.rows++; else sheet.cols++; }
 }
 const insertRow = (at) => withUndo(`Fila insertada (${at + 1})`, () => { shift('r', at, 1); });
@@ -137,16 +140,63 @@ const deleteRow = (at) => withUndo(`Fila ${at + 1} borrada`, () => { shift('r', 
 const deleteCol = (at) => withUndo(`Columna ${colName(at)} borrada`, () => { shift('c', at, -1); });
 
 // ---------- Dibujo de la grilla ----------
+// Formato de una celda → CSS en línea (anchos de Excel en caracteres → px; altos en puntos → px)
+const BORDER = {
+  thin: '1px solid', hair: '1px dotted', dotted: '1px dotted', dashed: '1px dashed', dashDot: '1px dashed', dashDotDot: '1px dotted',
+  medium: '2px solid', mediumDashed: '2px dashed', mediumDashDot: '2px dashed', mediumDashDotDot: '2px dotted', slantDashDot: '2px dashed',
+  thick: '3px solid', double: '3px double',
+};
+const H_ALIGN = { left: 'left', center: 'center', right: 'right', justify: 'justify', fill: 'left', centerContinuous: 'center', distributed: 'justify' };
+const V_ALIGN = { top: 'top', middle: 'middle', center: 'middle', bottom: 'bottom', justify: 'middle', distributed: 'middle' };
+const SIDE = { t: 'top', r: 'right', b: 'bottom', l: 'left' };
+const HEX = /^#[0-9A-F]{6}$/i;
+const colPx = (w) => Math.max(16, Math.round(w * 7 + 5));
+const rowPx = (h) => Math.max(14, Math.round((h * 4) / 3));
+function cellCss(st, tall) {
+  let s = '';
+  if (st) {
+    if (st.b) s += 'font-weight:700;';
+    if (st.i) s += 'font-style:italic;';
+    if (st.u || st.s) s += `text-decoration:${st.u ? 'underline' : ''}${st.s ? ' line-through' : ''};${/double/.test(st.u) ? 'text-decoration-style:double;' : ''}`;
+    if (HEX.test(st.fc)) s += `color:${st.fc};`;
+    if (HEX.test(st.bg)) s += `background:${st.bg};`;
+    if (st.fn) s += `font-family:'${String(st.fn).replace(/['"\\<>;&]/g, '')}',system-ui,sans-serif;`;
+    if (st.fs) s += `font-size:${+st.fs}pt;`;
+    if (st.ha && H_ALIGN[st.ha]) s += `text-align:${H_ALIGN[st.ha]};`;
+    if (st.va && V_ALIGN[st.va]) s += `vertical-align:${V_ALIGN[st.va]};`;
+    if (st.wr) s += 'white-space:pre-wrap;word-break:break-word;';
+    if (st.bd) {
+      for (const [k, side] of Object.entries(SIDE)) {
+        const b = st.bd[k];
+        if (b && BORDER[b.st]) s += `border-${side}:${BORDER[b.st]} ${HEX.test(b.c) ? b.c : '#000'};`;
+      }
+    }
+  }
+  if (tall && !(st && st.va)) s += 'vertical-align:bottom;'; // fila con alto propio: abajo, como en Excel
+  return s;
+}
+
 function render() {
   if (!sheet) return;
+  const styles = sheet.styles || {};
+  const colW = sheet.colW || {};
+  const rowH = sheet.rowH || {};
+  const wCss = [];
   let h = '<thead><tr><th class="corner"></th>';
-  for (let c = 0; c < sheet.cols; c++) h += `<th data-c="${c}">${colName(c)}</th>`;
+  for (let c = 0; c < sheet.cols; c++) {
+    const w = colW[c] != null ? colPx(colW[c]) : 0;
+    wCss[c] = w ? `width:${w}px;min-width:${w}px;max-width:${w}px;` : '';
+    h += `<th data-c="${c}"${w ? ` style="${wCss[c]}"` : ''}>${colName(c)}</th>`;
+  }
   h += '</tr></thead><tbody>';
   for (let r = 0; r < sheet.rows; r++) {
-    h += `<tr><th data-r="${r}">${r + 1}</th>`;
+    const hp = rowH[r] != null ? rowPx(rowH[r]) : 0;
+    const hCss = hp ? `height:${hp}px;max-height:${hp}px;` : '';
+    h += `<tr><th data-r="${r}"${hp ? ` style="${hCss}"` : ''}>${r + 1}</th>`;
     for (let c = 0; c < sheet.cols; c++) {
       const v = getCell(r, c);
-      h += `<td data-r="${r}" data-c="${c}"${isNum(v) ? ' class="num"' : ''}>${esc(v)}</td>`;
+      const css = wCss[c] + hCss + cellCss(styles[ref(r, c)], !!hp);
+      h += `<td data-r="${r}" data-c="${c}"${isNum(v) ? ' class="num"' : ''}${css ? ` style="${css}"` : ''}>${esc(v)}</td>`;
     }
     h += '</tr>';
   }
@@ -460,7 +510,7 @@ function refresh() {
 // ---------- Archivos ----------
 function blankFile(name) {
   const now = Date.now();
-  return { id: newId(), name, created: now, updated: now, rows: MIN_ROWS, cols: MIN_COLS, cells: {} };
+  return { id: newId(), name, created: now, updated: now, rows: MIN_ROWS, cols: MIN_COLS, cells: {}, styles: {}, colW: {}, rowH: {} };
 }
 function nextName(files) {
   const used = new Set(files.map((f) => f.name));
@@ -472,6 +522,10 @@ async function openFile(f) {
   commit();
   if (sheet && f.id !== sheet.id) await flushNow();
   sheet = f;
+  sheet.cells = sheet.cells || {};
+  sheet.styles = sheet.styles || {};
+  sheet.colW = sheet.colW || {};
+  sheet.rowH = sheet.rowH || {};
   sheet.rows = Math.max(sheet.rows || 0, MIN_ROWS);
   sheet.cols = Math.max(sheet.cols || 0, MIN_COLS);
   sel = { r: 0, c: 0 }; rec = 1; undoSnap = null;
@@ -491,7 +545,7 @@ async function showFiles() {
       <button class="file-open" type="button"><b>${esc(f.name)}</b><small>${esc(formatDate(f.updated))} · ${n} ${n === 1 ? 'celda' : 'celdas'} con datos${sheet && f.id === sheet.id ? ' · abierta' : ''}</small></button>
       <button class="icon-btn file-more" type="button" aria-label="Opciones de ${esc(f.name)}">⋮</button></li>`;
   }).join('');
-  $('files-note').textContent = `Guardadas en este dispositivo (${await storageKind()}). La nube y el inicio de sesión llegan en la Etapa 2.`;
+  $('files-note').textContent = `Guardadas en este dispositivo (${await storageKind()}). Con "Importar" se traen archivos .xlsx o .csv (cada uno queda como planilla nueva). La nube y el inicio de sesión llegan en la Etapa 2.`;
   $('files').hidden = false;
   showFiles.list = files;
 }
@@ -523,6 +577,8 @@ function fileMenu(f) {
     { label: 'Abrir', fn: async () => { hideFiles(); if (f.id !== sheet.id) await openFile(await getFile(f.id) || f); } },
     { label: 'Renombrar', fn: () => renameFile(f) },
     { label: 'Duplicar', fn: () => duplicateFile(f) },
+    '-',
+    ...EXPORTS.map((x) => ({ label: x.label, fn: () => exportFile(f, x.kind) })),
     '-',
     { label: 'Borrar', fn: () => removeFile(f), danger: true },
   ]);
@@ -564,6 +620,98 @@ async function removeFile(f) {
   await showFiles();
   snack(`"${f.name}" borrada`);
 }
+
+// ---------- Importar y exportar (.xlsx y .csv) ----------
+const EXPORTS = [
+  { label: 'Exportar a Excel (.xlsx)', kind: 'xlsx' },
+  { label: 'Exportar a CSV con ; (Excel en español)', kind: 'csv;' },
+  { label: 'Exportar a CSV con , (Google Sheets y otros)', kind: 'csv,' },
+];
+async function exportFile(f, kind) {
+  let file;
+  if (sheet && f.id === sheet.id) { commit(); await flushNow(); file = sheet; } else file = (await getFile(f.id)) || f;
+  const busy = setTimeout(() => snack('Preparando el archivo…'), 300);
+  try {
+    const blob = kind === 'xlsx' ? await toXlsx(file) : toCsv(file, kind[3]);
+    const name = `${safeName(file.name)}.${kind === 'xlsx' ? 'xlsx' : 'csv'}`;
+    clearTimeout(busy);
+    hideSnack();
+    const how = await deliverFile(name, blob);
+    if (how === 'downloaded') snack(`Descargado: ${name}`);
+  } catch (e) {
+    clearTimeout(busy);
+    snack(`No se pudo exportar (${e?.message || e})`);
+  }
+}
+
+const ACCEPT = '.xlsx,.xlsm,.xls,.csv,.tsv,.txt,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,'
+  + 'application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel,text/csv,text/comma-separated-values,application/csv,'
+  + 'text/tab-separated-values,text/plain';
+function pickImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = ACCEPT;
+  input.addEventListener('change', () => importFiles([...(input.files || [])]));
+  input.click();
+}
+function uniqueName(base, used) {
+  let name = base; let i = 2;
+  while (used.includes(name)) name = `${base} (${i++})`;
+  return name;
+}
+async function importFiles(list) {
+  if (!list.length) return;
+  commit();
+  await flushNow();
+  const busy = setTimeout(() => snack('Importando…'), 300);
+  const created = []; const notes = []; const errors = []; let big = 0;
+  const used = (await listFiles()).map((x) => x.name);
+  for (const fl of list) {
+    try {
+      const res = await importAny(fl.name, await fl.arrayBuffer());
+      for (const x of res.files) {
+        const f = blankFile(uniqueName(x.name, used));
+        used.push(f.name);
+        Object.assign(f, {
+          cells: x.cells, styles: x.styles, colW: x.colW, rowH: x.rowH,
+          rows: Math.max(x.rows, MIN_ROWS), cols: Math.max(x.cols, MIN_COLS),
+        });
+        await putFile(f);
+        created.push(f);
+        big = Math.max(big, f.rows * f.cols);
+      }
+      if (res.lost.length) notes.push({ name: fl.name, lost: res.lost });
+    } catch (e) {
+      errors.push(`${fl.name}: ${e instanceof ImportError ? e.message : `no se pudo importar (${e?.message || e}).`}`);
+    }
+  }
+  clearTimeout(busy);
+  hideSnack();
+  if (created.length) { hideFiles(); await openFile(created[0]); }
+  if (!notes.length && !errors.length && created.length === 1 && big <= 60000) { snack(`Importada: ${created[0].name}`); return; }
+  let html = '';
+  if (created.length === 1) html += `<p>Se importó <b>${esc(created[0].name)}</b>.</p>`;
+  else if (created.length) html += `<p>Se importaron ${created.length} planillas:</p><ul>${created.map((f) => `<li>${esc(f.name)}</li>`).join('')}</ul>`;
+  for (const n of notes) {
+    html += `<p>${notes.length > 1 || list.length > 1 ? `De <b>${esc(n.name)}</b>, lo` : 'Lo'} que no se pudo traer tal cual:</p>`
+      + `<ul>${n.lost.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`;
+  }
+  if (big > 60000) html += `<p>Es una planilla grande (${big.toLocaleString('es-AR')} celdas): en equipos viejos puede andar lento.</p>`;
+  if (errors.length) html += errors.map((t) => `<p class="dialog-error">${esc(t)}</p>`).join('');
+  openDialog(created.length ? 'Importación lista' : 'No se pudo importar', html);
+}
+
+$('btn-file-menu').addEventListener('click', () => {
+  commit();
+  showMenu(sheet.name, [
+    ...EXPORTS.map((x) => ({ label: x.label, fn: () => exportFile(sheet, x.kind) })),
+    '-',
+    { label: 'Importar .xlsx o .csv…', fn: pickImport },
+    { label: 'Mis planillas', fn: showFiles },
+  ]);
+});
+$('files-import').addEventListener('click', pickImport);
 
 // Primer arranque de la v0.0.3: el borrador único de la v0.0.1/v0.0.2 pasa a ser el primer archivo
 async function firstFile() {
@@ -657,13 +805,14 @@ function snack(text, actionLabel, onAction) {
   clearTimeout(snack.t);
   snack.t = setTimeout(() => s.classList.remove('show'), actionLabel ? 6000 : 2600);
 }
+function hideSnack() { $('snackbar').classList.remove('show'); }
 $('snack-btn').addEventListener('pointerdown', (e) => e.preventDefault());
 
 function showVersion() {
   const r = release;
   const dev = deviceInfo();
   openDialog(`Planillas v${APP_VERSION}`, `
-    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1b)</p>
+    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1c)</p>
     <p>Fecha de la versión: ${r && r.tag === `v${APP_VERSION}` ? esc(formatDate(r.fileDate)) : 'sin datos'}</p>
     ${r && isNewer(r.tag) ? `<p><b>Hay una versión nueva: ${esc(r.tag)}</b></p>` : ''}
     ${dev ? `<p>Equipo: ${esc(dev)}</p>` : ''}
