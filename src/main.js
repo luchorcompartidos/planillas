@@ -1,4 +1,5 @@
-// Planillas — Etapa 1d-1a: vista Reporte (tabla presentable) y selector Grilla / Reporte / Ficha.
+// Planillas — Etapa 1d-1b: en el Reporte, etiquetas de color, buscador, filtros rápidos y ordenar por columna.
+// Sobre la 1d-1a: vista Reporte (tabla presentable) y selector Grilla / Reporte / Ficha.
 // Sobre lo de la 1c (importar y exportar .xlsx y .csv) y la 1b (grilla completa, Ficha, archivos).
 // Grilla: tocar para seleccionar y otra vez para editar en la barra de fórmula; insertar y borrar
 // filas/columnas en el medio (menú de celda: mantener apretado, clic derecho o "Más…").
@@ -562,9 +563,62 @@ function formatTotal(c, rows) {
   sum = Number(sum.toPrecision(15));
   return sum.toLocaleString('es-AR', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+// ---------- Reporte: etiquetas, buscador, filtros rápidos y orden (1d-1b) ----------
+// Automático hasta la 1d-2 ("Configurar vista"). Búsqueda, filtro y orden quedan en memoria (por planilla abierta).
+const TAGS = 12; // colores de etiqueta (paleta fija por tema en styles.css: .tag.t0 … .tag.t11)
+const cmpText = new Intl.Collator('es', { numeric: true, sensitivity: 'base' }).compare;
+const fold = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+let rq = { id: null, q: '', chip: null, orden: null }; // orden = { c, dir: 1 | -1 }
+function repState() {
+  if (rq.id !== sheet.id) { rq = { id: sheet.id, q: '', chip: null, orden: null }; $('rep-q').value = ''; }
+  return rq;
+}
+// Columna de etiquetas: la primera de texto con 2 a 12 valores distintos y al menos uno repetido.
+function tagCol(cols, rows, nums) {
+  for (const c of cols) {
+    if (nums.has(c)) continue;
+    const vals = new Set(); let n = 0;
+    for (const r of rows) {
+      const v = getCell(r, c).trim();
+      if (!v) continue;
+      n++; vals.add(v);
+      if (vals.size > TAGS) break;
+    }
+    if (vals.size >= 2 && vals.size <= TAGS && vals.size < n) {
+      const list = [...vals].sort(cmpText);
+      return { c, list, color: new Map(list.map((v, i) => [v, i])) };
+    }
+  }
+  return null;
+}
+function sortRows(rows, o, nums) {
+  const isN = nums.has(o.c);
+  const key = (r) => { const v = getCell(r, o.c).trim(); return v === '' ? null : isN ? toNumber(v).n : v; };
+  return rows.map((r, i) => ({ r, k: key(r), i })).sort((a, b) => {
+    if (a.k == null || b.k == null) return a.k == null && b.k == null ? a.i - b.i : a.k == null ? 1 : -1; // vacías al final
+    const d = isN ? a.k - b.k : cmpText(a.k, b.k);
+    return d ? d * o.dir : a.i - b.i;
+  }).map((x) => x.r);
+}
+function renderChips(tag, counts) {
+  const box = $('rep-chips');
+  box.hidden = !tag;
+  if (!tag) { box.innerHTML = ''; return; }
+  const left = box.scrollLeft;
+  let all = 0; counts.forEach((n) => { all += n; });
+  let h = `<button type="button" class="chip${rq.chip == null ? ' on' : ''}" data-v="" aria-pressed="${rq.chip == null}">Todos <small>${all}</small></button>`;
+  for (const v of tag.list) {
+    const on = rq.chip === v;
+    h += `<button type="button" class="chip tag t${tag.color.get(v)}${on ? ' on' : ''}" data-v="${esc(v)}" aria-pressed="${on}">${esc(v)} <small>${counts.get(v) || 0}</small></button>`;
+  }
+  box.innerHTML = h;
+  box.scrollLeft = left;
+}
 function renderReport() {
-  const { cols, rows } = reportData();
+  const { cols, rows: all } = reportData();
   const table = $('rep-table'); const empty = $('rep-empty');
+  const st = repState();
+  $('rep-herr').hidden = !all.length;
   if (!cols.length) {
     table.innerHTML = '';
     empty.innerHTML = 'La planilla está vacía. Cargá datos en <b>Grilla</b> (la fila 1 son los títulos de las columnas) o en <b>Ficha</b>.';
@@ -572,36 +626,81 @@ function renderReport() {
     $('rep-total').textContent = 'Sin registros';
     return;
   }
-  const nums = numericCols(cols, rows);
+  const nums = numericCols(cols, all);
+  const tag = tagCol(cols, all, nums);
+  if (!tag || (st.chip != null && !tag.color.has(st.chip))) st.chip = null;
+  if (st.orden && !cols.includes(st.orden.c)) st.orden = null;
+  // Buscador (en todas las columnas, sin distinguir mayúsculas ni acentos) y después el filtro rápido
+  const q = fold(st.q.trim());
+  let rows = q ? all.filter((r) => cols.some((c) => fold(getCell(r, c)).includes(q))) : all;
+  const counts = new Map();
+  if (tag) rows.forEach((r) => { const v = getCell(r, tag.c).trim(); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
+  renderChips(tag, counts);
+  if (st.chip != null) rows = rows.filter((r) => getCell(r, tag.c).trim() === st.chip);
+  if (st.orden) rows = sortRows(rows, st.orden, nums);
   const title = (c) => getCell(0, c) || `Columna ${colName(c)}`;
   let h = '<thead><tr>';
-  cols.forEach((c, i) => { h += `<th class="${i === 0 ? 'fija' : ''}${nums.has(c) ? ' num' : ''}"><div>${esc(title(c))}</div></th>`; });
+  cols.forEach((c, i) => {
+    const o = st.orden && st.orden.c === c ? st.orden.dir : 0;
+    const cls = `${i === 0 ? 'fija' : ''}${nums.has(c) ? ' num' : ''}${o ? ' ord' : ''}`.trim();
+    h += `<th data-c="${c}"${cls ? ` class="${cls}"` : ''} aria-sort="${o > 0 ? 'ascending' : o < 0 ? 'descending' : 'none'}"><div>${esc(title(c))}<i aria-hidden="true">${o > 0 ? '▲' : o < 0 ? '▼' : ''}</i></div></th>`;
+  });
   h += '</tr></thead><tbody>';
   for (const r of rows) {
     h += `<tr data-r="${r}">`;
     cols.forEach((c, i) => {
       const cls = `${i === 0 ? 'fija' : ''}${nums.has(c) ? ' num' : ''}`.trim();
-      h += `<td${cls ? ` class="${cls}"` : ''}><div>${esc(getCell(r, c))}</div></td>`;
+      const v = getCell(r, c);
+      const t = tag && c === tag.c && v.trim() ? `<span class="tag t${tag.color.get(v.trim())}">${esc(v)}</span>` : esc(v);
+      h += `<td${cls ? ` class="${cls}"` : ''}><div>${t}</div></td>`;
     });
     h += '</tr>';
   }
   table.innerHTML = `${h}</tbody>`;
   empty.hidden = rows.length > 0;
-  if (!rows.length) empty.innerHTML = 'Solo hay títulos (fila 1). Los registros van de la fila 2 para abajo.';
-  // Total: la última columna numérica (automático; elegir columna y cálculo llega en la 1d-2)
+  if (!all.length) empty.innerHTML = 'Solo hay títulos (fila 1). Los registros van de la fila 2 para abajo.';
+  else if (!rows.length) empty.innerHTML = 'Ningún registro coincide con la búsqueda o el filtro. <button type="button" class="rep-limpiar" id="rep-limpiar">Ver todos</button>';
+  // Total: la última columna numérica, de lo que se ve (elegir columna y cálculo llega en la 1d-2)
   const totalCol = [...nums].pop();
   const n = rows.length;
-  $('rep-total').innerHTML = `<small>${n} ${n === 1 ? 'registro' : 'registros'}</small>`
+  const filtrado = n !== all.length;
+  $('rep-total').innerHTML = `<small>${filtrado ? `${n} de ${all.length}` : n} ${(filtrado ? all.length : n) === 1 ? 'registro' : 'registros'}</small>`
     + (totalCol != null ? `<span>Total ${esc(title(totalCol))}: <b>${esc(formatTotal(totalCol, rows))}</b></span>` : '');
 }
-// Tocar una fila: abrirla en la Ficha
+function rerenderFiltered() { renderReport(); repScroll.scrollTop = 0; }
+let qTimer = 0;
+$('rep-q').addEventListener('input', () => {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => { repState().q = $('rep-q').value; rerenderFiltered(); }, 200);
+});
+$('rep-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('rep-q').blur(); } });
+$('rep-chips').addEventListener('click', (e) => {
+  const b = e.target.closest('.chip');
+  if (!b) return;
+  const st = repState();
+  const v = b.dataset.v || null;
+  st.chip = v === st.chip ? null : v; // tocar el activo lo apaga
+  rerenderFiltered();
+});
+$('rep-empty').addEventListener('click', (e) => {
+  if (!e.target.closest('#rep-limpiar')) return;
+  const st = repState();
+  st.q = ''; st.chip = null; $('rep-q').value = '';
+  rerenderFiltered();
+});
+// Tocar una fila: abrirla en la Ficha. Tocar un título: orden ascendente → descendente → sin orden.
 $('rep-table').addEventListener('click', (e) => {
   const tr = e.target.closest('tbody tr');
-  if (!tr) return;
-  sel = { r: +tr.dataset.r, c: sel.c };
-  setView('ficha');
+  if (tr) { sel = { r: +tr.dataset.r, c: sel.c }; setView('ficha'); return; }
+  const th = e.target.closest('thead th');
+  if (!th) return;
+  const st = repState(); const c = +th.dataset.c;
+  const dir = st.orden && st.orden.c === c ? st.orden.dir : 0;
+  st.orden = dir === 0 ? { c, dir: 1 } : dir === 1 ? { c, dir: -1 } : null;
+  const left = repScroll.scrollLeft;
+  renderReport(); repScroll.scrollLeft = left;
+  snack(st.orden ? `Ordenado por ${getCell(0, c) || `Columna ${colName(c)}`} ${st.orden.dir > 0 ? '(A → Z, 0 → 9)' : '(Z → A, 9 → 0)'}` : 'Sin orden (como en la planilla)');
 });
-
 // Tema del reporte (para toda la app): oscuro por defecto, claro o el del sistema
 const TEMAS = { oscuro: 'Oscuro', claro: 'Claro', sistema: 'Sistema' };
 let tema = 'oscuro';
