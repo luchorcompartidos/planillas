@@ -9,3 +9,4 @@ Planillas tipo Excel pensadas primero para el celular: web + Android (Capacitor,
 | Versión | Contenido |
 |---|---|
 | v0.0.1 | Etapa 1a: esqueleto (Vite + Capacitor 7, CI con web y APK, mínimo Android 5.0) y grilla básica con borrador local |
+| v0.0.2 | CI: la web se publica con un nombre de paquete por intento y reintenta sola si GitHub falla (la v0.0.1 no llegó a publicarse) |

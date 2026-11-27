@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy2.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -95,11 +95,27 @@ jobs:
         env:
           VITE_APP_VERSION: ${{ needs.version.outputs.version }}
       - uses: actions/configure-pages@v5
+      # Nombre propio por intento: con "Re-run failed jobs" se sube otro paquete y, con el mismo nombre,
+      # deploy-pages fallaba con "Multiple artifacts named github-pages" (Planillas v0.0.1).
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+          name: github-pages-${{ github.run_attempt }}
+      # deploy-pages a veces falla con "No artifacts named github-pages were found" (problema pasajero
+      # de GitHub, visto en ANote... v0.2.1 y v0.4.0 y en Planillas v0.0.1): se reintenta solo una vez.
       - id: deploy
+        continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+      - name: Esperar antes de reintentar
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+      - id: deploy2
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
 
   android:
     needs: version
