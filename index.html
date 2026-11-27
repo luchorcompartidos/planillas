@@ -17,9 +17,13 @@
       <button class="file-title" id="file-title" type="button" aria-label="Mis planillas (abrir, crear, renombrar, borrar)">Planillas</button>
       <button class="version-chip" id="btn-version" type="button" aria-label="Versión y cambios">v__APP_VERSION__</button>
       <span class="spacer"></span>
-      <button class="view-btn" id="btn-view" type="button" aria-label="Cambiar de vista">Ficha</button>
       <button class="icon-btn more" id="btn-file-menu" type="button" aria-label="Exportar, importar y más">⋮</button>
     </header>
+    <nav class="viewbar" id="viewbar" role="tablist" aria-label="Vista">
+      <button class="vb" data-v="tabla" role="tab" type="button" aria-label="Vista Grilla (como Excel)">Grilla</button>
+      <button class="vb" data-v="reporte" role="tab" type="button" aria-label="Vista Reporte (tabla presentable)">Reporte</button>
+      <button class="vb" data-v="ficha" role="tab" type="button" aria-label="Vista Ficha (un registro por pantalla)">Ficha</button>
+    </nav>
     <div class="update-banner" id="update-banner" hidden>
       <span id="update-text">Hay una versión nueva.</span>
       <button class="text-btn" id="update-action" type="button">Recargar</button>
@@ -31,6 +35,16 @@
     </div>
     <main class="grid-wrap" id="grid-wrap" tabindex="0" aria-label="Planilla">
       <table class="grid" id="grid"></table>
+    </main>
+    <main class="reporte" id="reporte" aria-label="Vista Reporte" hidden>
+      <div class="rep-scroll" id="rep-scroll">
+        <table class="rep" id="rep-table"></table>
+        <p class="rep-empty" id="rep-empty" hidden></p>
+      </div>
+      <div class="rep-bar">
+        <span class="rep-total" id="rep-total"></span>
+        <button class="rep-tema" id="rep-tema" type="button" aria-label="Cambiar el tema del reporte (oscuro, claro o el del sistema)"></button>
+      </div>
     </main>
     <main class="ficha" id="ficha" aria-label="Vista Ficha" hidden>
       <div class="ficha-head" id="ficha-head"></div>

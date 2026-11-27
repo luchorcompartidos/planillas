@@ -1,20 +1,26 @@
-// Planillas — Etapa 1c: importar y exportar .xlsx y .csv (sobre la grilla, la Ficha y los archivos de la 1b).
+// Planillas — Etapa 1d-1a: vista Reporte (tabla presentable) y selector Grilla / Reporte / Ficha.
+// Sobre lo de la 1c (importar y exportar .xlsx y .csv) y la 1b (grilla completa, Ficha, archivos).
 // Grilla: tocar para seleccionar y otra vez para editar en la barra de fórmula; insertar y borrar
 // filas/columnas en el medio (menú de celda: mantener apretado, clic derecho o "Más…").
 // Ficha: un registro por pantalla (fila 1 = nombres de campo). Archivos guardados en IndexedDB.
 // Formato (de lo importado): negrita, colores, alineación, bordes, anchos y altos; todavía no se edita.
+// Reporte: solo hasta la última fila y columna con datos, franjas, encabezado (fila 1) destacado, primera
+// columna fija, barra de total y tema oscuro (por defecto) / claro / sistema. Tocar una fila abre la Ficha.
+// Cada planilla recuerda su vista (sheet.view); las importadas abren en Reporte.
 import './styles.css';
 import { APP_VERSION, CHANGELOG_URL, getLatestRelease, isNewer, formatDate } from './version.js';
 import { initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile } from './native.js';
 import { colName, parseRef, ref, isNum } from './refs.js';
-import { importAny, ImportError, toXlsx, toCsv, safeName } from './transfer.js';
+import { importAny, ImportError, toXlsx, toCsv, safeName, toNumber } from './transfer.js';
 import {
   listFiles, getFile, putFile, deleteFile, newId, savePending, clearPending, recoverPending, storageKind,
 } from './store.js';
 
 const OLD_DRAFT_KEY = 'planillas-borrador-v1'; // borrador único de la v0.0.1/v0.0.2
 const LAST_KEY = 'planillas-ultimo';
-const VIEW_KEY = 'planillas-vista';
+const VIEW_KEY = 'planillas-vista'; // vista única de la v0.0.3/v0.0.4 (solo se lee, para archivos sin vista propia)
+const TEMA_KEY = 'planillas-tema-reporte';
+const VIEWS = ['tabla', 'reporte', 'ficha'];
 const MIN_ROWS = 50;
 const MIN_COLS = 12;
 
@@ -25,10 +31,13 @@ const formula = $('formula');
 const nameBox = $('name-box');
 const ficha = $('ficha');
 const fields = $('ficha-fields');
+const reporte = $('reporte');
+const repScroll = $('rep-scroll');
 
 // ---------- Modelo ----------
 // sheet = archivo abierto = { id, name, created, updated, rows, cols, cells: { "A1": "texto" },
-//   styles: { "A1": { b, i, fc, bg, ha, bd, nf, … } }, colW: { 0: ancho Excel }, rowH: { 0: alto en puntos } }
+//   styles: { "A1": { b, i, fc, bg, ha, bd, nf, … } }, colW: { 0: ancho Excel }, rowH: { 0: alto en puntos },
+//   view: 'tabla' | 'reporte' | 'ficha' }
 // (detalle del formato en transfer.js)
 let sheet = null;
 let sel = { r: 0, c: 0 };
@@ -36,6 +45,8 @@ let editing = false;
 let original = '';
 let release = null;
 let view = 'tabla';
+let legacyView = 'tabla'; // vista para archivos de antes de la v0.0.5 (sin "view")
+let repPos = null; // posición del reporte al irse a otra vista (para volver al mismo lugar)
 let rec = 1; // fila (índice desde 0) del registro que muestra la Ficha; la fila 0 son los nombres de campo
 
 const getCell = (r, c) => sheet.cells[ref(r, c)] || '';
@@ -64,8 +75,13 @@ let dirty = false;
 let saving = Promise.resolve();
 function save() {
   if (!sheet) return;
-  dirty = true;
   sheet.updated = Date.now();
+  saveQuiet();
+}
+// Guarda sin cambiar la fecha de modificación (por ejemplo, al cambiar de vista)
+function saveQuiet() {
+  if (!sheet) return;
+  dirty = true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushNow, 300);
 }
@@ -349,7 +365,7 @@ function clearCell() {
 // ---------- Botones ----------
 // pointerdown + preventDefault: el botón no le saca el foco al campo de texto (no se cierra el teclado)
 function tool(id, fn) {
-  const b = $(id);
+  const b = typeof id === 'string' ? $(id) : id;
   b.addEventListener('pointerdown', (e) => e.preventDefault());
   b.addEventListener('click', fn);
 }
@@ -472,45 +488,155 @@ tool('btn-add-field', async () => {
   renderFicha(c);
 });
 
+// ---------- Cambio de vista (Grilla / Reporte / Ficha) ----------
 function setView(v) {
-  if (v === view) return;
-  if (v === 'ficha') {
-    commit();
-    rec = Math.max(1, sel.r);
-    lastFieldCol = null;
-    view = 'ficha';
-  } else {
+  if (v === view || !VIEWS.includes(v)) return;
+  if (view === 'tabla') commit();
+  if (view === 'reporte') repPos = { top: repScroll.scrollTop, left: repScroll.scrollLeft };
+  if (view === 'ficha') {
     const fc = focusedField() ?? lastFieldCol;
     if (document.activeElement) document.activeElement.blur?.();
-    view = 'tabla';
     sel = { r: rec, c: fc != null ? fc : sel.c };
   }
-  try { localStorage.setItem(VIEW_KEY, view); } catch { /* nada */ }
+  if (v === 'ficha') { rec = Math.max(1, sel.r); lastFieldCol = null; }
+  view = v;
+  if (sheet && sheet.view !== v) { sheet.view = v; saveQuiet(); }
   applyView();
 }
 function applyView() {
-  const f = view === 'ficha';
+  const f = view === 'ficha'; const t = view === 'tabla'; const p = view === 'reporte';
   ficha.hidden = !f; $('ficha-bar').hidden = !f;
-  wrap.hidden = f; $('formula-bar').hidden = f; $('grid-bar').hidden = f;
-  $('btn-view').textContent = f ? 'Tabla' : 'Ficha';
-  $('btn-view').setAttribute('aria-label', f ? 'Ver como tabla' : 'Ver como ficha (un registro por pantalla)');
+  wrap.hidden = !t; $('formula-bar').hidden = !t; $('grid-bar').hidden = !t;
+  reporte.hidden = !p;
+  document.querySelectorAll('#viewbar .vb').forEach((b) => {
+    const on = b.dataset.v === view;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
   if (f) { ficha.scrollTop = 0; renderFicha(sel.c < fieldCount() ? sel.c : null, true); }
-  else { render(); select(sel.r, sel.c); }
+  else if (t) { render(); select(sel.r, sel.c); }
+  else {
+    renderReport();
+    if (repPos) { repScroll.scrollTop = repPos.top; repScroll.scrollLeft = repPos.left; } else { repScroll.scrollTop = 0; repScroll.scrollLeft = 0; }
+  }
 }
-$('btn-view').addEventListener('click', () => setView(view === 'ficha' ? 'tabla' : 'ficha'));
+document.querySelectorAll('#viewbar .vb').forEach((b) => tool(b, () => setView(b.dataset.v)));
 
-// Redibuja la vista actual (después de deshacer o de abrir otro archivo)
-function refresh() {
+// ---------- Vista Reporte ----------
+// Filas y columnas con datos (sin las vacías del medio). Fila 0 = encabezado (nombres, como en la Ficha).
+function reportData() {
+  const usedR = new Set(); const usedC = new Set();
+  for (const k of Object.keys(sheet.cells)) {
+    const p = parseRef(k);
+    if (p && sheet.cells[k] !== '') { usedR.add(p.r); usedC.add(p.c); }
+  }
+  const cols = [...usedC].sort((a, b) => a - b);
+  const rows = [...usedR].filter((r) => r > 0).sort((a, b) => a - b);
+  return { cols, rows };
+}
+// Columna numérica: todos sus valores (sin el encabezado) son números (no porcentajes); al menos uno.
+function numericCols(cols, rows) {
+  const out = new Set();
+  for (const c of cols) {
+    let any = false; let ok = true;
+    for (const r of rows) {
+      const v = getCell(r, c);
+      if (v === '') continue;
+      const n = toNumber(v);
+      if (!n || n.pct) { ok = false; break; }
+      any = true;
+    }
+    if (ok && any) out.add(c);
+  }
+  return out;
+}
+const decimals = (v) => { const m = /[.,](\d+)/.exec(String(v).split(/e/i)[0]); return m ? m[1].length : 0; };
+function formatTotal(c, rows) {
+  let sum = 0; let d = 0;
+  for (const r of rows) {
+    const v = getCell(r, c);
+    const n = v === '' ? null : toNumber(v);
+    if (n) { sum += n.n; d = Math.max(d, decimals(v)); }
+  }
+  d = Math.min(d, 6);
+  sum = Number(sum.toPrecision(15));
+  return sum.toLocaleString('es-AR', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function renderReport() {
+  const { cols, rows } = reportData();
+  const table = $('rep-table'); const empty = $('rep-empty');
+  if (!cols.length) {
+    table.innerHTML = '';
+    empty.innerHTML = 'La planilla está vacía. Cargá datos en <b>Grilla</b> (la fila 1 son los títulos de las columnas) o en <b>Ficha</b>.';
+    empty.hidden = false;
+    $('rep-total').textContent = 'Sin registros';
+    return;
+  }
+  const nums = numericCols(cols, rows);
+  const title = (c) => getCell(0, c) || `Columna ${colName(c)}`;
+  let h = '<thead><tr>';
+  cols.forEach((c, i) => { h += `<th class="${i === 0 ? 'fija' : ''}${nums.has(c) ? ' num' : ''}"><div>${esc(title(c))}</div></th>`; });
+  h += '</tr></thead><tbody>';
+  for (const r of rows) {
+    h += `<tr data-r="${r}">`;
+    cols.forEach((c, i) => {
+      const cls = `${i === 0 ? 'fija' : ''}${nums.has(c) ? ' num' : ''}`.trim();
+      h += `<td${cls ? ` class="${cls}"` : ''}><div>${esc(getCell(r, c))}</div></td>`;
+    });
+    h += '</tr>';
+  }
+  table.innerHTML = `${h}</tbody>`;
+  empty.hidden = rows.length > 0;
+  if (!rows.length) empty.innerHTML = 'Solo hay títulos (fila 1). Los registros van de la fila 2 para abajo.';
+  // Total: la última columna numérica (automático; elegir columna y cálculo llega en la 1d-2)
+  const totalCol = [...nums].pop();
+  const n = rows.length;
+  $('rep-total').innerHTML = `<small>${n} ${n === 1 ? 'registro' : 'registros'}</small>`
+    + (totalCol != null ? `<span>Total ${esc(title(totalCol))}: <b>${esc(formatTotal(totalCol, rows))}</b></span>` : '');
+}
+// Tocar una fila: abrirla en la Ficha
+$('rep-table').addEventListener('click', (e) => {
+  const tr = e.target.closest('tbody tr');
+  if (!tr) return;
+  sel = { r: +tr.dataset.r, c: sel.c };
+  setView('ficha');
+});
+
+// Tema del reporte (para toda la app): oscuro por defecto, claro o el del sistema
+const TEMAS = { oscuro: 'Oscuro', claro: 'Claro', sistema: 'Sistema' };
+let tema = 'oscuro';
+try { const t = localStorage.getItem(TEMA_KEY); if (TEMAS[t]) tema = t; } catch { /* nada */ }
+const darkMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function applyTema() {
+  const claro = tema === 'claro' || (tema === 'sistema' && !(darkMq && darkMq.matches));
+  reporte.classList.toggle('claro', claro);
+  $('rep-tema').textContent = `◐ ${TEMAS[tema]}`;
+}
+if (darkMq && darkMq.addEventListener) darkMq.addEventListener('change', applyTema);
+$('rep-tema').addEventListener('click', () => {
+  tema = tema === 'oscuro' ? 'claro' : tema === 'claro' ? 'sistema' : 'oscuro';
+  try { localStorage.setItem(TEMA_KEY, tema); } catch { /* nada */ }
+  applyTema();
+  snack(`Tema del reporte: ${TEMAS[tema]}${tema === 'sistema' ? ` (ahora ${reporte.classList.contains('claro') ? 'claro' : 'oscuro'})` : ''}`);
+});
+applyTema();
+
+// Redibuja la vista actual (después de deshacer o de renombrar)
+function setTitle() {
   $('file-title').textContent = sheet.name;
   document.title = `${sheet.name} · Planillas`;
+}
+function refresh() {
+  setTitle();
   if (view === 'ficha') { rec = Math.max(1, Math.min(rec, lastUsed().mr)); renderFicha(); }
+  else if (view === 'reporte') renderReport();
   else { render(); select(Math.min(sel.r, sheet.rows - 1), Math.min(sel.c, sheet.cols - 1), { scroll: false }); }
 }
 
 // ---------- Archivos ----------
 function blankFile(name) {
   const now = Date.now();
-  return { id: newId(), name, created: now, updated: now, rows: MIN_ROWS, cols: MIN_COLS, cells: {}, styles: {}, colW: {}, rowH: {} };
+  return { id: newId(), name, created: now, updated: now, rows: MIN_ROWS, cols: MIN_COLS, cells: {}, styles: {}, colW: {}, rowH: {}, view: 'tabla' };
 }
 function nextName(files) {
   const used = new Set(files.map((f) => f.name));
@@ -528,10 +654,14 @@ async function openFile(f) {
   sheet.rowH = sheet.rowH || {};
   sheet.rows = Math.max(sheet.rows || 0, MIN_ROWS);
   sheet.cols = Math.max(sheet.cols || 0, MIN_COLS);
-  sel = { r: 0, c: 0 }; rec = 1; undoSnap = null;
+  sel = { r: 0, c: 0 }; rec = 1; undoSnap = null; repPos = null;
+  if (view === 'tabla') commit();
+  if (document.activeElement && focusedField() != null) document.activeElement.blur();
+  view = VIEWS.includes(sheet.view) ? sheet.view : legacyView;
   try { localStorage.setItem(LAST_KEY, f.id); } catch { /* nada */ }
-  refresh();
-  if (view === 'tabla') { wrap.scrollTop = 0; wrap.scrollLeft = 0; }
+  setTitle();
+  wrap.scrollTop = 0; wrap.scrollLeft = 0;
+  applyView();
 }
 
 async function showFiles() {
@@ -675,7 +805,7 @@ async function importFiles(list) {
         used.push(f.name);
         Object.assign(f, {
           cells: x.cells, styles: x.styles, colW: x.colW, rowH: x.rowH,
-          rows: Math.max(x.rows, MIN_ROWS), cols: Math.max(x.cols, MIN_COLS),
+          rows: Math.max(x.rows, MIN_ROWS), cols: Math.max(x.cols, MIN_COLS), view: 'reporte',
         });
         await putFile(f);
         created.push(f);
@@ -812,7 +942,7 @@ function showVersion() {
   const r = release;
   const dev = deviceInfo();
   openDialog(`Planillas v${APP_VERSION}`, `
-    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1c)</p>
+    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1d)</p>
     <p>Fecha de la versión: ${r && r.tag === `v${APP_VERSION}` ? esc(formatDate(r.fileDate)) : 'sin datos'}</p>
     ${r && isNewer(r.tag) ? `<p><b>Hay una versión nueva: ${esc(r.tag)}</b></p>` : ''}
     ${dev ? `<p>Equipo: ${esc(dev)}</p>` : ''}
@@ -852,12 +982,10 @@ async function start() {
   let files = [];
   try { files = await listFiles(); } catch { files = []; }
   let last = null;
-  try { last = localStorage.getItem(LAST_KEY); view = localStorage.getItem(VIEW_KEY) === 'ficha' ? 'ficha' : 'tabla'; } catch { /* nada */ }
+  try { last = localStorage.getItem(LAST_KEY); legacyView = localStorage.getItem(VIEW_KEY) === 'ficha' ? 'ficha' : 'tabla'; } catch { /* nada */ }
   let f = files.find((x) => x.id === last) || files[0];
   if (!f) f = await firstFile();
   await openFile(f);
-  applyView();
-  if (view === 'tabla') select(0, 0, { scroll: false });
 }
 start();
 checkUpdate();

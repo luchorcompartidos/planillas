@@ -91,6 +91,8 @@ export async function recoverPending() {
   try { p = JSON.parse(localStorage.getItem(LS_PENDING)); } catch { p = null; }
   if (!p || !p.id || !p.cells) { clearPending(); return; }
   const cur = await getFile(p.id);
-  if (!cur || (p.updated || 0) > (cur.updated || 0)) await putFile(p);
+  // Más nueva, o igual de nueva pero con otra vista (cambiar de vista no cambia la fecha; v0.0.5)
+  const pu = p.updated || 0; const cu = cur ? cur.updated || 0 : 0;
+  if (!cur || pu > cu || (pu === cu && p.view && p.view !== cur.view)) await putFile(p);
   clearPending();
 }

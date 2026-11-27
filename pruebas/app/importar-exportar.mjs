@@ -33,6 +33,7 @@ await page.waitForSelector('#dialog:not([hidden])', { timeout: 20000 });
 console.log('AVISO:', await page.$eval('#dialog', (d) => d.innerText.replace(/\n+/g, ' | ')));
 await shot('1-aviso');
 await page.evaluate(() => document.querySelector('#dialog-actions button').click());
+await page.tap('.vb[data-v="tabla"]'); // desde la v0.0.5 las importadas abren en Reporte
 console.log('abierta:', await page.$eval('#file-title', (e) => e.textContent));
 await shot('2-ida');
 const css = await page.evaluate(() => { const td = (r) => document.querySelector(`#grid td[data-r="${r[0]}"][data-c="${r[1]}"]`).getAttribute('style'); return { A1: td([0, 0]), G2: td([1, 6]), H6: td([5, 7]) }; });
@@ -60,7 +61,7 @@ await page.evaluate(() => [...document.querySelectorAll('.file-item')].find((li)
 await menuItem('Exportar a Excel'); await wait(1500);
 // 5. Abrir la de Ventas y la Ficha
 await page.evaluate(() => [...document.querySelectorAll('.file-item')].find((li) => li.querySelector('b').textContent.endsWith('Ventas')).querySelector('.file-open').click());
-await wait(300); await shot('4-ventas');
+await wait(300); await page.tap('.vb[data-v="tabla"]'); await wait(200); await shot('4-ventas');
 // 6. Recargar: se mantiene el formato
 await page.reload({ waitUntil: 'networkidle0' }); await page.waitForSelector('#grid td');
 console.log('tras recargar:', await page.$eval('#file-title', (e) => e.textContent), await page.evaluate(() => document.querySelector('#grid td[data-r="0"][data-c="1"]').getAttribute('style')));
