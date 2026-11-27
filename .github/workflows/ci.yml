@@ -196,11 +196,14 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          if [ -n "$PLANILLAS_KEYSTORE_PATH" ]; then
-            ./gradlew assembleRelease --no-daemon --stacktrace
-          else
-            ./gradlew assembleDebug --no-daemon --stacktrace
-          fi
+          TASK=assembleDebug; [ -n "$PLANILLAS_KEYSTORE_PATH" ] && TASK=assembleRelease
+          # Maven Central a veces responde 429 (demasiados pedidos) y la compilación falla (Planillas v0.0.2):
+          # se reintenta hasta 3 veces, esperando 60 s entre intentos. Lo ya bajado queda en el caché de Gradle.
+          for i in 1 2 3; do
+            ./gradlew "$TASK" --no-daemon --stacktrace && exit 0
+            [ "$i" -lt 3 ] && { echo "::warning::Falló el intento $i de compilar el APK; se reintenta en 60 s"; sleep 60; }
+          done
+          exit 1
       - name: Bibliotecas que piden más que Android 5.0 (solo si falló)
         if: failure()
         run: |

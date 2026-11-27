@@ -13,17 +13,17 @@
 <body>
   <div id="app">
     <header class="appbar">
-      <img class="appbar-icon" src="./icon.svg" alt="" width="28" height="28">
-      <h1 class="appbar-title">Planillas</h1>
+      <button class="icon-btn" id="btn-files" type="button" aria-label="Mis planillas"><img class="appbar-icon" src="./icon.svg" alt="" width="28" height="28"></button>
+      <button class="file-title" id="file-title" type="button" aria-label="Mis planillas (abrir, crear, renombrar, borrar)">Planillas</button>
       <button class="version-chip" id="btn-version" type="button" aria-label="Versión y cambios">v__APP_VERSION__</button>
       <span class="spacer"></span>
-      <span class="draft-label" id="draft-label">Borrador local</span>
+      <button class="view-btn" id="btn-view" type="button" aria-label="Cambiar de vista">Ficha</button>
     </header>
     <div class="update-banner" id="update-banner" hidden>
       <span id="update-text">Hay una versión nueva.</span>
       <button class="text-btn" id="update-action" type="button">Recargar</button>
     </div>
-    <div class="formula-bar">
+    <div class="formula-bar" id="formula-bar">
       <input id="name-box" class="name-box" type="text" value="A1" aria-label="Celda (escribí una referencia, ej. B12, y Enter)" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go">
       <span class="fx" aria-hidden="true">fx</span>
       <input id="formula" class="formula" type="text" aria-label="Contenido de la celda" autocomplete="off" spellcheck="false" enterkeyhint="done" placeholder="Tocá una celda y escribí acá">
@@ -31,20 +31,48 @@
     <main class="grid-wrap" id="grid-wrap" tabindex="0" aria-label="Planilla">
       <table class="grid" id="grid"></table>
     </main>
-    <nav class="bottombar" aria-label="Acciones">
+    <main class="ficha" id="ficha" aria-label="Vista Ficha" hidden>
+      <div class="ficha-head" id="ficha-head"></div>
+      <div id="ficha-fields"></div>
+      <button class="tool add-field" id="btn-add-field" type="button">+ Campo</button>
+    </main>
+    <nav class="bottombar" id="grid-bar" aria-label="Acciones">
       <button class="tool" id="btn-add-row" type="button">+ Fila</button>
       <button class="tool" id="btn-add-col" type="button">+ Columna</button>
       <button class="tool" id="btn-clear" type="button">Borrar celda</button>
+      <button class="tool" id="btn-more" type="button">Más…</button>
+    </nav>
+    <nav class="bottombar ficha-bar" id="ficha-bar" aria-label="Registros" hidden>
+      <button class="tool" id="f-prev" type="button" aria-label="Registro anterior">◀</button>
+      <span class="f-pos" id="f-pos"></span>
+      <button class="tool" id="f-next" type="button" aria-label="Registro siguiente">▶</button>
+      <button class="tool" id="f-new" type="button">+ Nuevo</button>
+      <button class="tool" id="f-del" type="button">Borrar</button>
     </nav>
   </div>
 
+  <section class="files" id="files" aria-label="Mis planillas" hidden>
+    <header class="appbar">
+      <button class="icon-btn back" id="files-close" type="button" aria-label="Volver">←</button>
+      <h1 class="appbar-title">Mis planillas</h1>
+      <span class="spacer"></span>
+      <button class="view-btn" id="files-new" type="button">+ Nueva</button>
+    </header>
+    <ul class="file-list" id="file-list"></ul>
+    <p class="files-note" id="files-note"></p>
+  </section>
+
   <div id="scrim" class="scrim" hidden></div>
+  <div id="menu" class="menu" role="menu" hidden>
+    <div class="menu-title" id="menu-title"></div>
+    <div id="menu-items"></div>
+  </div>
   <div id="dialog" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" hidden>
     <h2 class="dialog-title" id="dialog-title"></h2>
     <div class="dialog-body" id="dialog-body"></div>
-    <div class="dialog-actions"><button class="text-btn" id="dialog-close" type="button">Cerrar</button></div>
+    <div class="dialog-actions" id="dialog-actions"></div>
   </div>
-  <div id="snackbar" class="snackbar" role="status" aria-live="polite"></div>
+  <div id="snackbar" class="snackbar" role="status" aria-live="polite"><span id="snack-text"></span><button class="snack-btn" id="snack-btn" type="button" hidden></button></div>
 
   <!-- WebView o navegador demasiado viejo (por ejemplo, Android 5/6 sin actualizar "Android System WebView"):
        en vez de una pantalla en blanco, se muestra cómo arreglarlo. Escrito en JavaScript viejo (ES5) a propósito. -->
