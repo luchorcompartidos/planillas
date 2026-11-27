@@ -12,3 +12,4 @@ Planillas tipo Excel pensadas primero para el celular: web + Android (Capacitor,
 | v0.0.2 | CI: la web se publica con un nombre de paquete por intento y reintenta sola si GitHub falla (la v0.0.1 no llegó a publicarse) |
 | v0.0.3 | Etapa 1b: menú de celda (insertar/borrar filas y columnas, con Deshacer), vista Ficha (un registro por pantalla) y Mis planillas (varios archivos guardados en el dispositivo) |
 | v0.0.4 | Etapa 1c: importar y exportar Excel (.xlsx, con formato: negrita, colores, alineación, bordes, anchos y altos) y CSV; en Android, "Guardar o enviar" |
+| v0.0.5 | Etapa 1d-1a: vista Reporte (tabla presentable con franjas, encabezado destacado, primera columna fija, total y tema oscuro/claro) y selector Grilla / Reporte / Ficha; cada planilla recuerda su vista y las importadas abren en Reporte |
