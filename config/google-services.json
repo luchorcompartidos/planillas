@@ -51,6 +51,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "954988997127-0u5jnmv4ape82gh4en5632ol0f3pijk3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "io.github.luchorcompartidos.planillas",
+            "certificate_hash": "ddedad96045c24502fee525a4a161666b24d20be"
+          }
+        },
+        {
           "client_id": "954988997127-bqdn2bvjk11ppvvgh0vidkl0l9n3or7a.apps.googleusercontent.com",
           "client_type": 3
         }
