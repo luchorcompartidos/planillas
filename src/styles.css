@@ -371,3 +371,28 @@ body.resizing.rz-fila, body.resizing.rz-fila * { cursor: row-resize !important; 
 .config .tag.t8 { background: #E8F3CC; color: #4C6410; } .config .tag.t9 { background: #DDE2FA; color: #2E3C99; }
 .config .tag.t10 { background: #EFE3D8; color: #6B4A2E; } .config .tag.t11 { background: #E4E8EA; color: #3E4A50; }
 .dialog-sub { color: var(--texto-2); font-size: 13px !important; margin-top: -2px !important; }
+
+/* Cuenta (Etapa 2a) */
+.icon-btn.cuenta { position: relative; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 50%; }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+  background: #fff; color: var(--verde); font-weight: 700; font-size: 15px; line-height: 1; flex: none;
+}
+.avatar.big { width: 40px; height: 40px; font-size: 20px; background: var(--verde); color: #fff; }
+.avatar-dot { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: #F9A825; border: 2px solid var(--verde); }
+.cta-form { margin: 0; }
+.cta-lbl { display: block; font-size: 13px; color: var(--texto-2); margin-top: 8px; }
+.cta-chk { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0 8px; }
+.cta-chk input { width: 18px; height: 18px; margin: 0; accent-color: var(--verde); }
+.cta-acts { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.cta-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; margin: 4px -10px; }
+.cta-acts .text-btn, .cta-btn { white-space: nowrap; }
+.cta-btn { border: 0; background: var(--verde); color: #fff; font-weight: 600; padding: 9px 18px; border-radius: 20px; }
+.cta-btn.danger { background: #B3261E; }
+.cta-btn:disabled, .cta-form .text-btn:disabled, .cta-form .menu-item:disabled { opacity: .55; }
+.cta-quien { display: flex; align-items: center; gap: 12px; }
+.cta-quien small { color: var(--texto-2); word-break: break-all; }
+.cta-ok { color: var(--verde); font-weight: 600; }
+.cta-warn { background: #FFF8E1; border-left: 4px solid #F9A825; padding: 8px 10px !important; border-radius: 4px; }
+.cta-menu { margin: 8px -20px 0; border-top: 1px solid var(--linea); }
+.cta-menu .menu-item { width: 100%; text-align: left; }

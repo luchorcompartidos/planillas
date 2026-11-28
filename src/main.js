@@ -1,4 +1,5 @@
-// Planillas — Etapa 1e: edición más cómoda. Grilla: escribir en la celda misma (segundo toque o doble toque),
+// Planillas — Etapa 2a: cuenta opcional con correo y contraseña (la misma de ANote..., ver cuenta.js y cuenta-ui.js),
+// todavía sin nube. Sobre la Etapa 1e: edición más cómoda. Grilla: escribir en la celda misma (segundo toque o doble toque),
 // ancho de columnas y alto de filas arrastrando el borde del encabezado (doble toque = ajustar), elegir rangos
 // (mantener apretado y arrastrar, encabezados, Mayús) y copiar / cortar / pegar (también desde y hacia Excel o
 // Sheets, como texto con tabuladores). Reporte: mantener apretada una celda para cambiar su valor.
@@ -21,6 +22,7 @@ import {
   initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile, clipboardWrite, clipboardRead,
 } from './native.js';
 import { colName, parseRef, ref, isNum } from './refs.js';
+import { initCuenta, cuentaUser } from './cuenta-ui.js';
 import { importAny, ImportError, toXlsx, toCsv, safeName, toNumber } from './transfer.js';
 import {
   listFiles, getFile, putFile, deleteFile, newId, savePending, clearPending, recoverPending, storageKind,
@@ -1610,7 +1612,7 @@ async function showFiles() {
       <button class="file-open" type="button"><b>${esc(f.name)}</b><small>${esc(formatDate(f.updated))} · ${n} ${n === 1 ? 'celda' : 'celdas'} con datos${sheet && f.id === sheet.id ? ' · abierta' : ''}</small></button>
       <button class="icon-btn file-more" type="button" aria-label="Opciones de ${esc(f.name)}">⋮</button></li>`;
   }).join('');
-  $('files-note').textContent = `Guardadas en este dispositivo (${await storageKind()}). Con "Importar" se traen archivos .xlsx o .csv (cada uno queda como planilla nueva). La nube y el inicio de sesión llegan en la Etapa 2.`;
+  $('files-note').textContent = `Guardadas en este dispositivo (${await storageKind()}). Con "Importar" se traen archivos .xlsx o .csv (cada uno queda como planilla nueva). ${cuentaUser() ? `Sesión iniciada: ${cuentaUser().email}. ` : ''}La nube (guardar en tu cuenta y ver en todos tus dispositivos) llega en la próxima versión.`;
   $('files').hidden = false;
   showFiles.list = files;
 }
@@ -1881,12 +1883,13 @@ function showVersion() {
   const r = release;
   const dev = deviceInfo();
   openDialog(`Planillas v${APP_VERSION}`, `
-    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1e)</p>
+    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 2a)</p>
     <p>Fecha de la versión: ${r && r.tag === `v${APP_VERSION}` ? esc(formatDate(r.fileDate)) : 'sin datos'}</p>
     ${r && isNewer(r.tag) ? `<p><b>Hay una versión nueva: ${esc(r.tag)}</b></p>` : ''}
     ${dev ? `<p>Equipo: ${esc(dev)}</p>` : ''}
     <p><a href="${CHANGELOG_URL}" target="_blank" rel="noopener">Changelog (Releases en GitHub)</a></p>
-    <p style="color:#5F6368">Las planillas de esta versión quedan solo en este dispositivo.</p>`);
+    <p>Cuenta: ${cuentaUser() ? `sesión iniciada (${esc(cuentaUser().email || '')})` : 'sin iniciar sesión (opcional)'}</p>
+    <p style="color:#5F6368">Las planillas de esta versión quedan solo en este dispositivo (la nube llega en la próxima).</p>`);
 }
 $('btn-version').addEventListener('click', showVersion);
 
@@ -1928,6 +1931,7 @@ async function start() {
   await openFile(f);
 }
 start();
+initCuenta({ $, esc, openDialog, closeDialog, snack, hideSnack });
 checkUpdate();
 if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

@@ -1,0 +1,76 @@
+{
+  "project_info": {
+    "project_number": "954988997127",
+    "project_id": "notas-pro-2026",
+    "storage_bucket": "notas-pro-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954988997127:android:29545a827f766e93a0d8a2",
+        "android_client_info": {
+          "package_name": "io.github.luchorcompartidos.notas"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "954988997127-udb8n0efb55r4qdmrgsn722rts8mnrpb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "io.github.luchorcompartidos.notas",
+            "certificate_hash": "ddedad96045c24502fee525a4a161666b24d20be"
+          }
+        },
+        {
+          "client_id": "954988997127-bqdn2bvjk11ppvvgh0vidkl0l9n3or7a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxbQFDMziTsABNmsI5vXGt4zEVA5PP7wU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "954988997127-bqdn2bvjk11ppvvgh0vidkl0l9n3or7a.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:954988997127:android:efa0f69e970056daa0d8a2",
+        "android_client_info": {
+          "package_name": "io.github.luchorcompartidos.planillas"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "954988997127-bqdn2bvjk11ppvvgh0vidkl0l9n3or7a.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxbQFDMziTsABNmsI5vXGt4zEVA5PP7wU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "954988997127-bqdn2bvjk11ppvvgh0vidkl0l9n3or7a.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
