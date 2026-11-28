@@ -8,9 +8,9 @@ const lento = () => new Promise((r) => setTimeout(r, 60));
 window.__fbsim = window.__fbsim || { correos: [], verificar: (m) => { const c = cuentas(); if (c[m]) { c[m].verified = true; guardar(c); } } };
 
 let auth = null; const oyentes = [];
-const hacerUser = (m) => { const a = cuentas()[m]; if (!a) return null; return { uid: a.uid, email: m, displayName: a.name || null, emailVerified: !!a.verified, providerData: [{ providerId: 'password', email: m }], getIdToken: async () => 'tok' }; };
+const hacerUser = (m) => { const a = cuentas()[m]; if (!a) return null; return { uid: a.uid, email: m, displayName: a.name || null, emailVerified: !!a.verified, providerData: [{ providerId: 'password', email: m }], getIdToken: async () => 'tok', getIdTokenResult: async () => ({ authTime: new Date(LS.get('fb-sim-sesion-t', Date.now())).toUTCString() }) }; };
 const avisar = () => oyentes.forEach((f) => f(auth.currentUser));
-const entrar = (m) => { LS.set('fb-sim-sesion', m); auth.currentUser = hacerUser(m); avisar(); return { user: auth.currentUser }; };
+const entrar = (m) => { LS.set('fb-sim-sesion', m); LS.set('fb-sim-sesion-t', Date.now()); auth.currentUser = hacerUser(m); avisar(); return { user: auth.currentUser }; };
 
 export const initializeApp = (cfg) => ({ cfg });
 export const indexedDBLocalPersistence = 'idb'; export const browserLocalPersistence = 'ls';

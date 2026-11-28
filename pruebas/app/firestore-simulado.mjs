@@ -1,14 +1,25 @@
 // Reemplaza firebase/firestore en la prueba (v0.0.10). Los datos viven en el servidor de prueba (armar.sh, /__fs),
 // así dos "dispositivos" (dos contextos de Chrome) comparten la misma nube. Solo lo que usa src/nube.js.
 // Desde la prueba: window.__fssim.offline = true (sin conexión) y window.__fssim.lecturas / .escrituras.
+// v0.0.11: setDoc, updateDoc (con "a.b" y arrayUnion / arrayRemove / deleteField), deleteDoc, t.update, varias
+// condiciones where (array-contains y ==) y onSnapshot de un documento. Cada pedido lleva la cuenta de la sesión
+// simulada (x-auth) y el servidor de armar.sh aplica una copia en JavaScript de firestore-planillas.rules.
 const SIM = (window.__fssim = window.__fssim || { offline: false, lecturas: 0, escrituras: 0 });
 const err = (code) => Object.assign(new Error(`Firestore: ${code}`), { code });
 async function api(path, body) {
   if (SIM.offline) { await new Promise((r) => setTimeout(r, 50)); throw err('unavailable'); }
-  const r = await fetch(`/__fs/${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const h = { 'x-auth': JSON.stringify(authNow()) };
+  const r = await fetch(`/__fs/${path}`, body ? { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify(body) } : { headers: h });
   const j = await r.json();
   if (j.error) throw err(j.error);
   return j;
+}
+function authNow() {
+  try {
+    const m = JSON.parse(localStorage.getItem('fb-sim-sesion'));
+    const a = (JSON.parse(localStorage.getItem('fb-sim-cuentas')) || {})[m];
+    return a ? { uid: a.uid, email: m, verified: !!a.verified } : null;
+  } catch { return null; }
 }
 const clone = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)));
 const TS = { __ts: 1 };
@@ -16,15 +27,18 @@ const TS = { __ts: 1 };
 export const memoryLocalCache = () => ({ kind: 'memory' });
 export function initializeFirestore(app, opts) { return { app, opts }; }
 export const serverTimestamp = () => TS;
+export const arrayUnion = (...v) => ({ __op: 'union', v });
+export const arrayRemove = (...v) => ({ __op: 'remove', v });
+export const deleteField = () => ({ __op: 'del' });
 
 export function doc(_db, ...seg) { const path = seg.join('/'); return { type: 'doc', path, id: seg[seg.length - 1] }; }
 export function collection(_db, ...seg) { return { type: 'col', path: seg.join('/') }; }
 export const where = (field, op, value) => ({ field, op, value });
-export const query = (col, w) => ({ ...col, where: w });
+export const query = (col, ...w) => ({ ...col, wheres: w });
 
 function docSnap(path, data) {
   const id = path.split('/').pop();
-  return { id, ref: { type: 'doc', path, id }, exists: () => data != null, data: () => clone(data) };
+  return { id, ref: { type: 'doc', path, id }, exists: () => data != null, data: () => clone(data), metadata: { fromCache: false } };
 }
 function querySnap(rows, changes) {
   const docs = rows.map((r) => docSnap(r.path, r.data));
@@ -33,7 +47,7 @@ function querySnap(rows, changes) {
 
 export async function getDoc(ref) { SIM.lecturas++; const j = await api(`doc?path=${encodeURIComponent(ref.path)}`); return docSnap(ref.path, j.data); }
 async function list(q) {
-  const w = q.where ? `&field=${encodeURIComponent(q.where.field)}&contains=${encodeURIComponent(q.where.value)}` : '';
+  const w = q.wheres && q.wheres.length ? `&where=${encodeURIComponent(JSON.stringify(q.wheres))}` : '';
   const j = await api(`col?path=${encodeURIComponent(q.path)}${w}`);
   SIM.lecturas += j.rows.length || 1;
   return j.rows;
@@ -41,7 +55,9 @@ async function list(q) {
 export async function getDocs(q) { return querySnap(await list(q)); }
 
 // Escucha: pide la consulta cada 1 s (deja ratos sin red: las pruebas esperan "networkidle0") y arma los cambios (added / modified / removed)
-export function onSnapshot(q, next, onError) {
+export function onSnapshot(q, a, b, c) {
+  const [next, onError] = typeof a === 'function' ? [a, b] : [b, c];
+  if (q.type === 'doc') return watchDoc(q, next, onError || (() => {}));
   let prev = null; let stop = false; let t = 0;
   const tick = async () => {
     if (stop) return;
@@ -70,14 +86,34 @@ export function onSnapshot(q, next, onError) {
   return () => { stop = true; clearTimeout(t); };
 }
 
+function watchDoc(ref, next, onError) {
+  let prev; let stop = false; let t = 0;
+  const tick = async () => {
+    if (stop) return;
+    try {
+      const j = await api(`doc?path=${encodeURIComponent(ref.path)}`);
+      const now = JSON.stringify(j.data ?? null);
+      if (now !== prev) { prev = now; next(docSnap(ref.path, j.data)); }
+    } catch (e) { if (e.code !== 'unavailable') { stop = true; onError(e); return; } }
+    if (!stop) t = setTimeout(tick, 1000);
+  };
+  tick();
+  return () => { stop = true; clearTimeout(t); };
+}
+
 function batchOps() {
   const writes = [];
   return {
     writes,
     set(ref, data) { writes.push({ op: 'set', path: ref.path, data: clone(data) }); },
+    update(ref, data) { writes.push({ op: 'update', path: ref.path, data: clone(data) }); },
     delete(ref) { writes.push({ op: 'delete', path: ref.path }); },
   };
 }
+const one = async (w) => { SIM.escrituras++; await api('commit', { writes: [w], checks: [] }); };
+export const setDoc = (ref, data) => one({ op: 'set', path: ref.path, data: clone(data) });
+export const updateDoc = (ref, data) => one({ op: 'update', path: ref.path, data: clone(data) });
+export const deleteDoc = (ref) => one({ op: 'delete', path: ref.path });
 export function writeBatch() {
   const b = batchOps();
   return { set: b.set, delete: b.delete, commit: async () => { SIM.escrituras += b.writes.length; await api('commit', { writes: b.writes, checks: [] }); } };
@@ -90,6 +126,7 @@ export async function runTransaction(_db, fn) {
     const t = {
       get: async (ref) => { const j = await api(`doc?path=${encodeURIComponent(ref.path)}`); SIM.lecturas++; checks.push({ path: ref.path, json: JSON.stringify(j.data ?? null) }); return docSnap(ref.path, j.data); },
       set: (ref, data) => { b.set(ref, data); return t; },
+      update: (ref, data) => { b.update(ref, data); return t; },
       delete: (ref) => { b.delete(ref); return t; },
     };
     const out = await fn(t);

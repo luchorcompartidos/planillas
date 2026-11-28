@@ -1,4 +1,6 @@
-// Planillas — Etapa 2a: cuenta opcional con correo y contraseña (la misma de ANote..., ver cuenta.js y cuenta-ui.js),
+// Planillas — Etapa 2b-2a (v0.0.11): compartir planillas de la cuenta con otras personas (invitar por correo, con
+// «Puede editar» o «Solo puede ver»), «Compartidas conmigo», modo solo lectura y salir de una compartida; datos en nube.js.
+// Etapa 2b-1 (v0.0.10): planillas propias en la nube. Etapa 2a: cuenta opcional con correo y contraseña (la misma de ANote..., ver cuenta.js y cuenta-ui.js),
 // todavía sin nube. Sobre la Etapa 1e: edición más cómoda. Grilla: escribir en la celda misma (segundo toque o doble toque),
 // ancho de columnas y alto de filas arrastrando el borde del encabezado (doble toque = ajustar), elegir rangos
 // (mantener apretado y arrastrar, encabezados, Mayús) y copiar / cortar / pegar (también desde y hacia Excel o
@@ -22,7 +24,7 @@ import {
   initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile, clipboardWrite, clipboardRead,
 } from './native.js';
 import { colName, parseRef, ref, isNum } from './refs.js';
-import { initCuenta, cuentaUser, nubeInfo, nubeAdopt, nubeIsAccount } from './cuenta-ui.js';
+import { initCuenta, cuentaUser, nubeInfo, nubeAdopt, nubeIsAccount, nubeMod, openAccount } from './cuenta-ui.js';
 import { importAny, ImportError, toXlsx, toCsv, safeName, toNumber } from './transfer.js';
 import {
   listFiles, getFile, putFile, deleteFile, newId, savePending, clearPending, recoverPending, storageKind,
@@ -87,8 +89,18 @@ let dirty = false;
 let saving = Promise.resolve();
 function save() {
   if (!sheet) return;
+  if (isRO()) { roNotice(); setTimeout(reloadOpen, 0); return; } // por las dudas: lo cambiado en memoria se descarta
   sheet.updated = Date.now();
   saveQuiet();
+}
+// Compartida conmigo con «Solo puede ver» (v0.0.11): no se edita (la vista del Reporte sí, solo en este dispositivo)
+const myRole = (id = sheet && sheet.id) => { const N = nubeMod(); return N && id ? N.role(id) : null; };
+const isRO = () => myRole() === 'view';
+let roTold = 0;
+function roNotice() {
+  if (Date.now() - roTold < 1500) return;
+  roTold = Date.now();
+  snack('Solo podés ver esta planilla (te la compartieron con «Solo puede ver»)');
 }
 // Guarda sin cambiar la fecha de modificación (por ejemplo, al cambiar de vista)
 function saveQuiet() {
@@ -121,6 +133,7 @@ function snapshot() {
 }
 function withUndo(text, fn) {
   commit();
+  if (isRO()) { roNotice(); return; }
   const snap = snapshot();
   const id = sheet.id;
   fn();
@@ -329,6 +342,7 @@ function placeEditor() {
   cellEd.style.textAlign = td.classList.contains('num') && !cellEd.value ? 'right' : 'left';
 }
 function startEdit(initial, where = 'cell') {
+  if (isRO()) { roNotice(); return; }
   if (!editing) { editing = true; original = getCell(sel.r, sel.c); formula.value = original; }
   if (typeof initial === 'string') { formula.value = initial; liveUpdate(); }
   cellEd.value = formula.value;
@@ -418,6 +432,7 @@ const editBlur = () => setTimeout(() => {
   if (editing && a !== formula && a !== cellEd) commit();
 }, 0);
 formula.addEventListener('focus', () => {
+  if (isRO()) { roNotice(); return; }
   if (!editing) { editing = true; original = getCell(sel.r, sel.c); formula.value = original; paintSelection(); }
 });
 formula.addEventListener('input', () => { if (!cellEd.hidden) cellEd.value = formula.value; liveUpdate(); });
@@ -459,6 +474,7 @@ wrap.addEventListener('keydown', (e) => {
 // Borrar el contenido de la celda o del rango (el formato queda, como Supr en Excel)
 function clearCell() {
   if (editing) cancel();
+  if (isRO()) { roNotice(); return; }
   if (!isRange()) {
     setCell(sel.r, sel.c, '');
     paintCell(sel.r, sel.c);
@@ -491,6 +507,14 @@ function openCellMenu(focus) {
   commit();
   const { r, c } = sel;
   const R = rect(); const multi = isRange();
+  if (isRO()) {
+    showMenu(multi ? `Rango ${rectName(R)} (solo ver)` : `Celda ${ref(r, c)} (solo ver)`, [
+      { label: `Copiar ${rectName(R)}`, fn: () => copySel(false) },
+      { label: 'Seleccionar todo', fn: selectAll },
+      { label: r >= 1 ? `Ver fila ${r + 1} como ficha` : 'Ver como ficha', fn: () => setView('ficha') },
+    ]);
+    return;
+  }
   const nR = R.r2 - R.r1 + 1; const nC = R.c2 - R.c1 + 1;
   const colsTxt = nC > 1 ? `columnas ${colName(R.c1)}:${colName(R.c2)}` : `columna ${colName(c)}`;
   const rowsTxt = nR > 1 ? `filas ${R.r1 + 1}:${R.r2 + 1}` : `fila ${r + 1}`;
@@ -604,7 +628,7 @@ let rz = null; // arrastre de un borde: { axis, i, start, px0, px, moved, el }
 let lastRzTap = null;
 grid.addEventListener('pointerdown', (e) => {
   const h = e.target.closest('.rz');
-  if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (!h || (e.pointerType === 'mouse' && e.button !== 0) || isRO()) return;
   e.preventDefault(); e.stopPropagation();
   commit();
   const axis = h.dataset.rzc != null ? 'c' : 'r';
@@ -797,6 +821,7 @@ function grab(cut) {
   return R;
 }
 async function copySel(cut, ev) {
+  if (cut && isRO()) cut = false; // solo puede ver: cortar copia
   const R = grab(cut);
   const n = (R.r2 - R.r1 + 1) * (R.c2 - R.c1 + 1);
   const what = `${n === 1 ? ref(R.r1, R.c1) : `${rectName(R)} (${n} celdas)`}`;
@@ -806,6 +831,7 @@ async function copySel(cut, ev) {
 }
 async function pasteSel(textFromEvent) {
   commit();
+  if (isRO()) { roNotice(); return; }
   let text = textFromEvent;
   if (text == null) text = await clipboardRead();
   let src;
@@ -861,16 +887,17 @@ function renderFicha(focusCol, scrollOnly = false) {
   const { mr } = lastUsed();
   const n = fieldCount();
   const noNames = n > 0 && !Array.from({ length: n }, (_, c) => getCell(0, c)).some(Boolean);
+  const ro = isRO();
   let h = '';
   for (let c = 0; c < n; c++) {
     const name = getCell(0, c);
     const v = getCell(rec, c);
     h += `<label class="field"><span class="field-name${name ? '' : ' sin-nombre'}">${esc(name || `Columna ${colName(c)}`)}<small>${colName(c)}${rec + 1}</small></span>`
-      + `<input type="text" data-c="${c}" value="${esc(v)}" autocomplete="off" enterkeyhint="${c < n - 1 ? 'next' : 'done'}"${isNum(v) ? ' class="num"' : ''}></label>`;
+      + `<input type="text" data-c="${c}" value="${esc(v)}" autocomplete="off" enterkeyhint="${c < n - 1 ? 'next' : 'done'}"${isNum(v) ? ' class="num"' : ''}${ro ? ' readonly' : ''}></label>`;
   }
   fields.innerHTML = h;
   let head = '';
-  if (n === 0) head = '<p class="ficha-hint">La planilla está vacía. Agregá el primer campo con <b>+ Campo</b> (su nombre va a la fila 1).</p>';
+  if (n === 0) head = ro ? '<p class="ficha-hint">La planilla está vacía.</p>' : '<p class="ficha-hint">La planilla está vacía. Agregá el primer campo con <b>+ Campo</b> (su nombre va a la fila 1).</p>';
   else if (noNames) head = '<p class="ficha-hint">Los nombres de los campos son los de la <b>fila 1</b> de la tabla. Ponelos ahí (o con <b>+ Campo</b>).</p>';
   $('ficha-head').innerHTML = head;
   updateFichaNav(mr);
@@ -891,7 +918,7 @@ function updateFichaNav(mr = lastUsed().mr) {
 }
 fields.addEventListener('input', (e) => {
   const inp = e.target.closest('input[data-c]');
-  if (!inp) return;
+  if (!inp || isRO()) return;
   const c = +inp.dataset.c;
   if (rec >= sheet.rows) sheet.rows = rec + 1;
   setCell(rec, c, inp.value);
@@ -915,13 +942,14 @@ const focusedField = () => {
 function goRecord(r) {
   const fc = focusedField();
   rec = Math.max(1, r);
-  if (rec >= sheet.rows) { sheet.rows = rec + 1; save(); }
+  if (rec >= sheet.rows && !isRO()) { sheet.rows = rec + 1; save(); }
   renderFicha(fc);
   if (fc == null) ficha.scrollTop = 0;
 }
 tool('f-prev', () => goRecord(rec - 1));
 tool('f-next', () => goRecord(rec + 1));
 tool('f-new', () => {
+  if (isRO()) { roNotice(); return; }
   const { mr } = lastUsed();
   if (fieldCount() === 0) { snack('Primero agregá un campo (+ Campo)'); return; }
   rec = Math.max(1, mr + 1);
@@ -929,12 +957,14 @@ tool('f-new', () => {
   renderFicha(0);
 });
 tool('f-del', async () => {
+  if (isRO()) { roNotice(); return; }
   const r = rec;
   const ok = await ask({ title: `¿Borrar el registro ${r}?`, text: `Se borra la fila ${r + 1} de la tabla y las de abajo suben.`, ok: 'Borrar', danger: true });
   if (!ok) return;
   withUndo(`Registro ${r} borrado`, () => { shift('r', r, -1); });
 });
 tool('btn-add-field', async () => {
+  if (isRO()) { roNotice(); return; }
   const name = await ask({ title: 'Campo nuevo', text: 'Nombre del campo (va a la fila 1, en la primera columna libre):', input: '', ok: 'Agregar' });
   if (name == null) return;
   const c = fieldCount();
@@ -954,7 +984,7 @@ function setView(v) {
     if (document.activeElement) document.activeElement.blur?.();
     sel = { r: rec, c: fc != null ? fc : sel.c };
   }
-  if (v === 'ficha') { rec = Math.max(1, sel.r); lastFieldCol = null; }
+  if (v === 'ficha') { rec = Math.max(1, sel.r); if (isRO()) rec = Math.max(1, Math.min(rec, lastUsed().mr)); lastFieldCol = null; }
   view = v;
   if (sheet && sheet.view !== v) { sheet.view = v; saveQuiet(); }
   applyView();
@@ -1344,6 +1374,7 @@ $('rep-table').addEventListener('contextmenu', (e) => {
   editFromReport(+td.parentElement.dataset.r, +td.dataset.c);
 });
 async function editFromReport(r, c) {
+  if (isRO()) { roNotice(); return; }
   const { cols, rows } = reportData();
   const { shown } = orderedCols(cols);
   const old = getCell(r, c);
@@ -1607,6 +1638,7 @@ async function openFile(f) {
   try { localStorage.setItem(LAST_KEY, f.id); } catch { /* nada */ }
   setTitle();
   wrap.scrollTop = 0; wrap.scrollLeft = 0;
+  applyRO();
   applyView();
 }
 
@@ -1616,13 +1648,19 @@ async function showFiles() {
   await renderFiles();
   $('files').hidden = false;
 }
-// Lista de Mis planillas. Con la sesión iniciada: "En tu cuenta" y "Solo en este dispositivo" (v0.0.10).
+// Lista de Mis planillas. Con la sesión iniciada: "En tu cuenta", "Compartidas conmigo" (v0.0.11) y "Solo en este
+// dispositivo" (v0.0.10).
+const ROLE_TXT = { owner: 'Dueño', edit: 'Puede editar', view: 'Solo puede ver' };
+const personas = (n) => `${n} ${n === 1 ? 'persona' : 'personas'}`;
 async function renderFiles() {
   const files = await listFiles();
   const info = nubeInfo();
   const item = (f) => {
     const n = Object.keys(f.cells || {}).length;
-    const nube = info && info.ids.has(f.id) ? (info.dirty.has(f.id) ? ' · <span class="nube-pend">sin subir</span>' : ' · en la nube') : '';
+    const sh = info && info.shared.get(f.id);
+    let nube = info && info.ids.has(f.id) ? (info.dirty.has(f.id) ? ' · <span class="nube-pend">sin subir</span>' : ' · en la nube') : '';
+    if (sh && sh.role === 'owner') nube += ` · <span class="file-shared">compartida con ${personas(sh.n - 1)}</span>`;
+    else if (sh) nube = `${info.dirty.has(f.id) ? ' · <span class="nube-pend">sin subir</span>' : ''} · <span class="file-shared">de ${esc(sh.ownerName || 'otra persona')} · ${ROLE_TXT[sh.role].toLowerCase()}</span>`;
     return `<li class="file-item${sheet && f.id === sheet.id ? ' current' : ''}" data-id="${esc(f.id)}">
       <button class="file-open" type="button"><b>${esc(f.name)}</b><small>${esc(formatDate(f.updated))} · ${n} ${n === 1 ? 'celda' : 'celdas'} con datos${sheet && f.id === sheet.id ? ' · abierta' : ''}${nube}</small></button>
       <button class="icon-btn file-more" type="button" aria-label="Opciones de ${esc(f.name)}">⋮</button></li>`;
@@ -1630,9 +1668,13 @@ async function renderFiles() {
   const user = cuentaUser();
   let html;
   if (info) {
-    const mine = files.filter((f) => info.ids.has(f.id));
+    const other = (f) => { const sh = info.shared.get(f.id); return !!sh && sh.role !== 'owner'; };
+    const mine = files.filter((f) => info.ids.has(f.id) && !other(f));
+    const withMe = files.filter((f) => info.ids.has(f.id) && other(f));
     const here = files.filter((f) => !info.ids.has(f.id));
-    html = `<li class="file-sec">En tu cuenta</li>${mine.map(item).join('') || `<li class="file-empty">${info.synced ? 'Todavía no hay planillas en tu cuenta.' : 'Conectando con la nube…'}</li>`}`;
+    html = info.invites ? `<li class="file-inv"><button class="text-btn" id="files-invites" type="button">✉ ${info.invites === 1 ? 'Tenés 1 invitación' : `Tenés ${info.invites} invitaciones`} para ver planillas compartidas</button></li>` : '';
+    html += `<li class="file-sec">En tu cuenta</li>${mine.map(item).join('') || `<li class="file-empty">${info.synced ? 'Todavía no hay planillas en tu cuenta.' : 'Conectando con la nube…'}</li>`}`;
+    if (withMe.length) html += `<li class="file-sec">Compartidas conmigo</li>${withMe.map(item).join('')}`;
     if (here.length) html += `<li class="file-sec">Solo en este dispositivo</li>${here.map(item).join('')}`;
   } else html = files.map(item).join('');
   $('file-list').innerHTML = html;
@@ -1642,7 +1684,7 @@ async function renderFiles() {
     const estado = info.error || (pend
       ? (info.offline ? `Sin conexión: ${pend === 1 ? '1 planilla con cambios sin subir' : `${pend} planillas con cambios sin subir`} (se suben al volver la conexión).` : `Subiendo ${pend === 1 ? '1 planilla' : `${pend} planillas`}…`)
       : (info.synced ? 'Todo al día en la nube.' : 'Conectando con la nube…'));
-    note = `Sesión: ${user.email}. ${estado} Las planillas nuevas e importadas se guardan en tu cuenta. Con "Importar" se traen archivos .xlsx o .csv.`;
+    note = `Sesión: ${user.email}. ${estado} Las planillas nuevas e importadas se guardan en tu cuenta. Para compartir una: ⋮ → Compartir. Con "Importar" se traen archivos .xlsx o .csv.${info.verified ? '' : ' Verificá tu correo (botón de cuenta, arriba) para ver las planillas que te compartan.'}`;
   } else if (user) {
     note = `Sesión: ${user.email}. Conectando con la nube… Con "Importar" se traen archivos .xlsx o .csv.`;
   } else {
@@ -1650,6 +1692,8 @@ async function renderFiles() {
   }
   $('files-note').textContent = note;
   showFiles.list = files;
+  const inv = $('files-invites');
+  if (inv) inv.addEventListener('click', showInvites);
 }
 function hideFiles() { $('files').hidden = true; }
 $('btn-files').addEventListener('click', showFiles);
@@ -1675,18 +1719,21 @@ $('file-list').addEventListener('click', async (e) => {
 });
 
 function fileMenu(f) {
+  const role = myRole(f.id);
   showMenu(f.name, [
     { label: 'Abrir', fn: async () => { hideFiles(); if (f.id !== sheet.id) await openFile(await getFile(f.id) || f); } },
-    { label: 'Renombrar', fn: () => renameFile(f) },
-    { label: 'Duplicar', fn: () => duplicateFile(f) },
+    ...(role === 'owner' ? [{ label: 'Compartir…', fn: () => showShare(f.id) }] : role ? [{ label: 'Personas con acceso…', fn: () => showShare(f.id) }] : []),
+    ...(role === 'view' ? [] : [{ label: 'Renombrar', fn: () => renameFile(f) }]),
+    { label: role && role !== 'owner' ? 'Duplicar (copia tuya)' : 'Duplicar', fn: () => duplicateFile(f) },
     ...(nubeInfo() && !nubeIsAccount(f.id) ? [{ label: 'Subir a mi cuenta', fn: () => uploadFile(f) }] : []),
     '-',
     ...EXPORTS.map((x) => ({ label: x.label, fn: () => exportFile(f, x.kind) })),
     '-',
-    { label: 'Borrar', fn: () => removeFile(f), danger: true },
+    role && role !== 'owner' ? { label: 'Salir de la planilla', fn: () => removeFile(f), danger: true } : { label: 'Borrar', fn: () => removeFile(f), danger: true },
   ]);
 }
 async function renameFile(f) {
+  if (myRole(f.id) === 'view') { roNotice(); return; }
   const name = await ask({ title: 'Renombrar', text: 'Nombre nuevo:', input: f.name, ok: 'Guardar' });
   if (name == null || !name.trim()) return;
   if (sheet && f.id === sheet.id) { sheet.name = name.trim(); save(); await flushNow(); refresh(); } else {
@@ -1714,8 +1761,12 @@ function uploadFile(f) {
   snack(`"${f.name}" se sube a tu cuenta`);
 }
 async function removeFile(f) {
-  const text = nubeIsAccount(f.id) ? 'Se borra de tu cuenta y de todos tus dispositivos. No se puede deshacer.' : 'Se borra de este dispositivo. No se puede deshacer.';
-  const ok = await ask({ title: `¿Borrar "${f.name}"?`, text, ok: 'Borrar', danger: true });
+  const role = myRole(f.id);
+  const sh = nubeInfo()?.shared.get(f.id);
+  const leaving = role && role !== 'owner';
+  const text = leaving ? 'Deja de aparecer en tus planillas (en todos tus dispositivos). Para los demás sigue igual. Para volver, el dueño te tiene que invitar de nuevo.'
+    : nubeIsAccount(f.id) ? `Se borra de tu cuenta y de todos tus dispositivos${sh ? `, y también para las ${personas(sh.n - 1)} con quienes la compartiste` : ''}. No se puede deshacer.` : 'Se borra de este dispositivo. No se puede deshacer.';
+  const ok = await ask({ title: leaving ? `¿Salir de "${f.name}"?` : `¿Borrar "${f.name}"?`, text, ok: leaving ? 'Salir' : 'Borrar', danger: true });
   if (!ok) return;
   if (sheet && f.id === sheet.id) { clearTimeout(saveTimer); dirty = false; await saving; }
   await deleteFile(f.id);
@@ -1727,7 +1778,7 @@ async function removeFile(f) {
     await openFile(next);
   }
   await showFiles();
-  snack(`"${f.name}" borrada`);
+  snack(leaving ? `Saliste de "${f.name}"` : `"${f.name}" borrada`);
 }
 
 // ---------- Importar y exportar (.xlsx y .csv) ----------
@@ -1814,7 +1865,12 @@ async function importFiles(list) {
 $('btn-file-menu').addEventListener('click', () => {
   commit();
   const grupos = view === 'reporte' && vopt('plegables') && (renderReport.groups || []).length > 1;
+  const role = myRole();
+  const nInv = nubeInfo()?.invites || 0;
   showMenu(sheet.name, [
+    ...(role === 'owner' || (!role && cuentaUser()) ? [{ label: 'Compartir…', fn: () => showShare(sheet.id) }] : role ? [{ label: 'Personas con acceso…', fn: () => showShare(sheet.id) }] : []),
+    ...(nInv ? [{ label: `Invitaciones (${nInv})`, fn: showInvites }] : []),
+    ...(role || nInv || cuentaUser() ? ['-'] : []),
     { label: 'Configurar vista del Reporte…', fn: openConfig },
     ...(grupos ? [{ label: 'Plegar todos los grupos', fn: () => foldAll(true) }, { label: 'Desplegar todos los grupos', fn: () => foldAll(false) }] : []),
     '-',
@@ -1980,6 +2036,7 @@ async function reloadOpen() {
   f.view = sheet.view;
   sheet = normalize(f);
   undoSnap = null;
+  applyRO();
   refresh();
   wrap.scrollTop = top; wrap.scrollLeft = left;
 }
@@ -2006,22 +2063,228 @@ const nubeHooks = {
     });
     return !!ok;
   },
-  remoteChanged: async (id) => {
-    if (sheet && sheet.id === id) { await reloadOpen(); snack(`"${sheet.name}" se actualizó con cambios de otro dispositivo`); }
+  remoteChanged: async (id, isNew, by) => {
+    if (sheet && sheet.id === id) { await reloadOpen(); snack(`"${sheet.name}" se actualizó con cambios ${by ? `de ${by}` : 'de otro dispositivo'}`); }
+    if (id === openWhenArrives) {
+      openWhenArrives = null;
+      const f = await getFile(id);
+      if (f) { hideFiles(); closeMenu(); await openFile(f); snack(`Abierta: "${f.name}" (compartida con vos)`); }
+    }
     if (filesOpen()) await renderFiles();
   },
-  remoteDeleted: async (id) => {
-    if (sheet && sheet.id === id) await openOther(`"${sheet.name}" se borró en otro dispositivo`);
+  remoteDeleted: async (id, why) => {
+    const msg = why && why.unshared
+      ? `"${why.name}" ya no está compartida con vos${why.copy ? `: tus cambios sin subir quedaron en "${why.copy}"` : ''}`
+      : sheet && sheet.id === id ? `"${sheet.name}" se borró en otro dispositivo` : '';
+    if (sheet && sheet.id === id) await openOther(msg);
+    else if (why && why.unshared) snack(msg);
     if (filesOpen()) await renderFiles();
   },
+  shared: (id) => {
+    if (sheet && sheet.id === id) { applyRO(); if (view === 'ficha') renderFicha(); }
+    if (filesOpen()) renderFiles();
+    if (shareOpen === id) drawShare();
+  },
+  invites: (list) => paintInvites(list),
   removedMany: async (ids) => {
     if (sheet && ids.includes(sheet.id)) await openOther();
     if (filesOpen()) await renderFiles();
   },
   conflict: (name, copy) => snack(`"${name}" cambió también en otro dispositivo: lo de acá quedó en "${copy}"`),
   error: (text) => snack(text),
-  status: () => { if (filesOpen()) renderFiles(); },
+  status: () => { if (filesOpen()) renderFiles(); if (sheet) applyRO(); },
 };
+
+// ---------- Compartir (Etapa 2b-2a, v0.0.11) ----------
+// Banda arriba de la planilla abierta si está compartida: de quién es y qué permiso tengo (tocar = Personas con acceso).
+function applyRO() {
+  const ro = isRO();
+  document.body.classList.toggle('ro', ro);
+  formula.readOnly = ro;
+  if (ro && editing) cancel();
+  const b = $('share-banner');
+  const sh = sheet && nubeInfo()?.shared.get(sheet.id);
+  b.hidden = !sh;
+  b.classList.toggle('ro', ro);
+  if (!sh) return;
+  b.innerHTML = sh.role === 'owner'
+    ? `👥 Compartida con <b>${personas(sh.n - 1)}</b> · tocá para ver quiénes`
+    : `👥 De <b>${esc(sh.ownerName || 'otra persona')}</b> · ${sh.role === 'view' ? '<b>Solo podés ver</b>' : 'Podés editar'}`;
+}
+$('share-banner').addEventListener('click', () => { if (sheet) showShare(sheet.id); });
+
+// Invitaciones para mí: banda arriba, ⋮ → Invitaciones y Mis planillas
+let invitesNow = [];
+let openWhenArrives = null; // planilla recién aceptada: se abre cuando llega de la nube
+function paintInvites(list) {
+  invitesNow = list || [];
+  const b = $('invites-banner');
+  b.hidden = !invitesNow.length;
+  if (invitesNow.length) {
+    const i = invitesNow[0];
+    $('invites-text').textContent = invitesNow.length === 1
+      ? `${i.fromName || i.fromEmail} te compartió «${i.sheetName || 'una planilla'}»`
+      : `Tenés ${invitesNow.length} planillas compartidas para aceptar`;
+  }
+  if (filesOpen()) renderFiles();
+  if (!$('dialog').hidden && invitesOpen) drawInvites();
+}
+$('invites-action').addEventListener('click', showInvites);
+
+let invitesOpen = false;
+function showInvites() {
+  if (dialogDone) closeDialog();
+  invitesOpen = true;
+  openDialog('Compartidas con vos', '<div id="inv-body"></div>', [{ label: 'Cerrar', value: null }]);
+  dialogDone = () => { invitesOpen = false; };
+  drawInvites();
+}
+function drawInvites() {
+  const body = $('inv-body');
+  if (!body) return;
+  const info = nubeInfo();
+  if (info && !info.verified) {
+    body.innerHTML = '<p>Para ver las planillas que te compartan, primero verificá tu correo (botón de cuenta, arriba → «Ya lo verifiqué»).</p>';
+    return;
+  }
+  body.innerHTML = invitesNow.length ? `<div class="sh-list">${invitesNow.map((i) => `
+    <div class="sh-row">
+      <span class="avatar">${esc((i.fromName || i.fromEmail || '?')[0].toUpperCase())}</span>
+      <div class="sh-txt"><b>${esc(i.sheetName || 'Planilla')}</b><small>${esc(i.fromName || '')}${i.fromEmail ? ` (${esc(i.fromEmail)})` : ''} · ${ROLE_TXT[i.role] || ''}</small></div>
+      <button class="text-btn" type="button" data-no="${esc(i.id)}">Rechazar</button>
+      <button class="cta-btn" type="button" data-si="${esc(i.id)}">Aceptar</button>
+    </div>`).join('')}</div>` : '<p>No hay invitaciones pendientes.</p>';
+  const N = nubeMod();
+  body.querySelectorAll('[data-si]').forEach((b) => b.addEventListener('click', async () => {
+    const inv = invitesNow.find((x) => x.id === b.dataset.si);
+    if (!inv || !N) return;
+    b.disabled = true;
+    try {
+      await N.acceptInvite(inv);
+      openWhenArrives = inv.sheetId;
+      invitesNow = invitesNow.filter((x) => x.id !== inv.id);
+      closeDialog();
+      snack(`"${inv.sheetName || 'Planilla'}" se agrega a «Compartidas conmigo»…`);
+    } catch (e) {
+      b.disabled = false;
+      snack(shareErr(e, 'aceptar'));
+    }
+  }));
+  body.querySelectorAll('[data-no]').forEach((b) => b.addEventListener('click', async () => {
+    const inv = invitesNow.find((x) => x.id === b.dataset.no);
+    if (!inv || !N) return;
+    try { await N.declineInvite(inv); invitesNow = invitesNow.filter((x) => x.id !== inv.id); drawInvites(); snack('Invitación rechazada'); } catch (e) { snack(shareErr(e, 'rechazar')); }
+  }));
+}
+function shareErr(e, what) {
+  const c = e?.code || '';
+  if (c === 'unavailable') return `Sin conexión: no se pudo ${what}. Probá cuando tengas internet.`;
+  if (c === 'gone') return 'Esa planilla ya no existe (la borró el dueño).';
+  if (c === 'permission-denied') return `La nube no dejó ${what}. ¿Están pegadas en Firebase las reglas nuevas de Planillas (v0.0.11)?`;
+  return `No se pudo ${what} (${c || e?.message || 'error'})`;
+}
+
+// Hoja «Compartir» / «Personas con acceso»
+let shareOpen = null;
+let sharePending = [];
+let shareUnsub = null;
+function stopShareWatch() { if (shareUnsub) { try { shareUnsub(); } catch { /* nada */ } } shareUnsub = null; shareOpen = null; sharePending = []; }
+function showShare(id) {
+  const N = nubeMod();
+  if (dialogDone) closeDialog();
+  stopShareWatch();
+  if (!N || !N.role(id)) {
+    const user = cuentaUser();
+    openDialog('Compartir', user
+      ? '<p>Para compartirla, primero tiene que estar en tu cuenta: Mis planillas → ⋮ → <b>Subir a mi cuenta</b>.</p>'
+      : '<p>Para compartir planillas hace falta iniciar sesión (botón de persona, arriba). Sin cuenta, las planillas quedan solo en este dispositivo.</p>',
+    user ? [{ label: 'Cerrar', value: null }] : [{ label: 'Cerrar', value: null }, { label: 'Iniciar sesión', value: 'login' }]);
+    dialogDone = (v) => { if (v === 'login') openAccount(); };
+    return;
+  }
+  shareOpen = id;
+  const owner = N.role(id) === 'owner';
+  openDialog(owner ? 'Compartir' : 'Personas con acceso', '<div id="sh-body"></div>', [{ label: 'Cerrar', value: null }]);
+  dialogDone = () => stopShareWatch();
+  if (owner) shareUnsub = N.watchSheetInvites(id, (list) => { sharePending = list; if (shareOpen === id) drawShare(); });
+  drawShare();
+}
+function drawShare() {
+  const N = nubeMod();
+  const id = shareOpen;
+  const body = $('sh-body');
+  if (!N || !id || !body) return;
+  const x = N.shareInfo(id);
+  if (!x) { closeDialog(); return; }
+  const name = (showFiles.list || []).find((f) => f.id === id)?.name || (sheet && sheet.id === id ? sheet.name : '');
+  const owner = x.role === 'owner';
+  const keepMail = body.querySelector('#sh-mail')?.value || '';
+  const keepRole = body.querySelector('#sh-role')?.value || 'edit';
+  if (owner && !x.uploaded) {
+    body.innerHTML = `<p><b>${esc(name)}</b> todavía no terminó de subirse a tu cuenta${nubeInfo()?.offline ? ' (sin conexión)' : ''}. Probá de nuevo en unos segundos.</p>`;
+    return;
+  }
+  const rows = x.people.map((p) => `
+    <div class="sh-row">
+      <span class="avatar">${esc((p.name || p.email || '?')[0].toUpperCase())}</span>
+      <div class="sh-txt"><b>${esc(p.me ? `${p.name || 'Vos'} (vos)` : (p.name || p.email || 'Persona'))}</b><small>${esc(p.email || '')}</small></div>
+      ${owner && p.role !== 'owner'
+        ? `<select data-rol="${esc(p.uid)}" aria-label="Permiso de ${esc(p.name || p.email)}"><option value="edit"${p.role === 'edit' ? ' selected' : ''}>Puede editar</option><option value="view"${p.role === 'view' ? ' selected' : ''}>Solo puede ver</option></select>
+           <button class="sh-x" type="button" data-quitar="${esc(p.uid)}" aria-label="Quitar el acceso de ${esc(p.name || p.email)}">✕</button>`
+        : `<small>${ROLE_TXT[p.role]}</small>`}
+    </div>`).join('') + (owner ? sharePending.map((p) => `
+    <div class="sh-row pend">
+      <span class="avatar">✉</span>
+      <div class="sh-txt"><b>${esc(p.email)}</b><small>Invitación sin aceptar · ${ROLE_TXT[p.role]}</small></div>
+      <button class="sh-x" type="button" data-cancelar="${esc(p.id)}" aria-label="Cancelar la invitación a ${esc(p.email)}">✕</button>
+    </div>`).join('') : '');
+  body.innerHTML = `<p class="dialog-sub"><b>${esc(name)}</b></p><div class="sh-list">${rows}</div>${owner ? `
+    <div class="sh-form">
+      <input class="dialog-input" id="sh-mail" type="email" placeholder="Correo de la persona" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="email" value="${esc(keepMail)}">
+      <select id="sh-role" aria-label="Permiso"><option value="edit"${keepRole === 'edit' ? ' selected' : ''}>Puede editar</option><option value="view"${keepRole === 'view' ? ' selected' : ''}>Solo puede ver</option></select>
+      <button class="cta-btn" id="sh-go" type="button">Invitar</button>
+    </div>
+    <p class="dialog-sub">La persona la ve al abrir Planillas con esa cuenta (la misma de ANote...), con el correo verificado: avisale para que acepte la invitación. Si cambian la misma planilla a la vez, lo del que llega segundo queda en una copia (hasta que llegue la edición conjunta por celda).</p>`
+    : `<p class="dialog-sub">Tu permiso: <b>${ROLE_TXT[x.role]}</b>. Solo el dueño invita o cambia permisos. ${x.role === 'view' ? 'Podés copiarla con ⋮ → Duplicar (queda una copia tuya).' : ''}</p>
+    <div class="cta-acts"><button class="text-btn danger" id="sh-leave" type="button">Salir de la planilla</button></div>`}`;
+  body.querySelectorAll('[data-rol]').forEach((sel2) => sel2.addEventListener('change', async () => {
+    try { await N.setRole(id, sel2.dataset.rol, sel2.value); snack('Permiso cambiado'); } catch (e) { snack(shareErr(e, 'cambiar el permiso')); drawShare(); }
+  }));
+  body.querySelectorAll('[data-quitar]').forEach((b) => b.addEventListener('click', async () => {
+    const p = x.people.find((q) => q.uid === b.dataset.quitar);
+    const who = p ? (p.name || p.email) : 'esa persona';
+    if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = 'Quitar'; b.classList.add('danger'); snack(`Tocá «Quitar» otra vez para sacarle el acceso a ${who}`); return; }
+    try { await N.removeMember(id, b.dataset.quitar); snack(`${who} ya no tiene acceso`); } catch (e) { snack(shareErr(e, 'quitar el acceso')); }
+  }));
+  body.querySelectorAll('[data-cancelar]').forEach((b) => b.addEventListener('click', async () => {
+    try { await N.cancelInvite(b.dataset.cancelar); snack('Invitación cancelada'); } catch (e) { snack(shareErr(e, 'cancelar la invitación')); }
+  }));
+  const go = body.querySelector('#sh-go');
+  if (go) {
+    const send = async () => {
+      const mail = body.querySelector('#sh-mail').value.trim().toLowerCase();
+      const r = body.querySelector('#sh-role').value;
+      if (!/^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(mail)) { snack('Escribí un correo válido'); return; }
+      if (mail === x.myEmail) { snack('Ese es tu propio correo'); return; }
+      if (x.people.some((p) => (p.email || '').toLowerCase() === mail)) { snack('Esa persona ya tiene acceso'); return; }
+      go.disabled = true;
+      try {
+        await N.invite(id, mail, r);
+        body.querySelector('#sh-mail').value = '';
+        snack(`Invitación enviada a ${mail}. Avisale para que la acepte.`);
+      } catch (e) { snack(shareErr(e, 'invitar')); }
+      if (go.isConnected) go.disabled = false;
+    };
+    go.addEventListener('click', send);
+    body.querySelector('#sh-mail').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+  }
+  const leave = body.querySelector('#sh-leave');
+  if (leave) leave.addEventListener('click', async () => {
+    const f = (await getFile(id)) || { id, name };
+    closeDialog();
+    await removeFile(f);
+  });
+}
 
 start();
 initCuenta({ $, esc, openDialog, closeDialog, snack, hideSnack, nube: nubeHooks });

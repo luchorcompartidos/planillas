@@ -4,6 +4,7 @@
 // Firebase (cuenta.js) se carga recién cuando hace falta: al tocar el botón, o al abrir la app si ya había
 // una sesión (marca CUENTA_KEY), así una app sin cuenta no carga nada de Firebase al arrancar.
 // Nube (v0.0.10): con la sesión iniciada se carga nube.js (Firestore) y las planillas de la cuenta se sincronizan.
+// v0.0.11: compartir (en nube.js y main.js) y «cerrar sesión en todos los dispositivos» del administrador de ANote...
 const CUENTA_KEY = 'planillas-cuenta'; // correo de la sesión abierta (solo para saber si cargar Firebase al abrir)
 
 let A = null; // módulo cuenta.js (cargado)
@@ -38,12 +39,31 @@ async function load() {
 async function startNube(u) {
   try {
     if (!N) N = await import('./nube.js');
-    if (user && user.uid === u.uid) await N.start(u, ui.nube);
+    if (user && user.uid === u.uid) await N.start(u, { ...ui.nube, revoked: forcedSignOut });
   } catch (e) {
     console.warn('Nube', e);
     ui.snack('No se pudo conectar con la nube. Las planillas siguen en este dispositivo.');
   }
   if (ui.nube) ui.nube.status();
+}
+
+// Verificó el correo o cambió el nombre: la nube lo sabe (invitaciones, nombre que ven los demás)
+const tellNube = () => { if (N && user) N.userChanged(user); };
+
+// El administrador de ANote... cerró la sesión en todos los dispositivos (control/{uid}.revokedAt)
+let forcing = false;
+async function forcedSignOut() {
+  if (forcing || !user) return;
+  forcing = true; leaving = true;
+  try {
+    let ids = [];
+    try { ids = N ? await Promise.race([N.leave(), new Promise((r) => setTimeout(() => r([]), 15000))]) : []; } catch { /* se cierra igual */ }
+    try { await A.signOutUser(); } catch { /* nada */ }
+    user = null; paintButton();
+    if (ui.nube) await ui.nube.removedMany(ids || []);
+    ui.openDialog('Sesión cerrada', '<p>El administrador de ANote... cerró tu sesión en todos tus dispositivos (es la misma cuenta). Las planillas de tu cuenta siguen en la nube: volvé a entrar para verlas.</p>',
+      [{ label: 'Cerrar', value: null }]);
+  } finally { forcing = false; leaving = false; }
 }
 
 const shownName = (u) => (u.displayName || '').trim() || (u.email || '').split('@')[0];
@@ -199,7 +219,7 @@ async function showAccount({ created = false } = {}) {
   const u = user;
   const verif = u.emailVerified
     ? '<p class="cta-ok">✓ Correo verificado</p>'
-    : `<p class="cta-warn"><b>Falta verificar el correo.</b> ${created ? 'Te mandamos un correo' : 'Buscá el correo que te mandamos'} con el link (mirá también en spam). Hasta verificarlo no vas a poder compartir planillas ni ver las que te compartan (cuando llegue compartir).</p>
+    : `<p class="cta-warn"><b>Falta verificar el correo.</b> ${created ? 'Te mandamos un correo' : 'Buscá el correo que te mandamos'} con el link (mirá también en spam). Hasta verificarlo no vas a poder ver las planillas que te compartan.</p>
        <div class="cta-links"><button class="text-btn" id="cta-verif-ok" type="button">Ya lo verifiqué</button><button class="text-btn" id="cta-verif-again" type="button">Reenviar el correo</button></div>`;
   const f = form(created ? 'Cuenta creada' : 'Mi cuenta', `
     <p class="cta-quien"><span class="avatar big">${ui.esc((shownName(u)[0] || '?').toUpperCase())}</span><span><b>${ui.esc(shownName(u))}</b><br><small>${ui.esc(u.email || '')}</small></span></p>
@@ -215,7 +235,7 @@ async function showAccount({ created = false } = {}) {
   if (ok) {
     ok.addEventListener('click', () => busy(ok, 'Revisando…', async () => {
       user = await A.refreshUser(); paintButton();
-      if (user.emailVerified) { ui.snack('Correo verificado'); showAccount(); } else setErr('Todavía figura sin verificar. Tocá el link del correo y probá de nuevo.');
+      if (user.emailVerified) { tellNube(); ui.snack('Correo verificado'); showAccount(); } else setErr('Todavía figura sin verificar. Tocá el link del correo y probá de nuevo.');
     }));
     const again = ui.$('cta-verif-again');
     again.addEventListener('click', () => busy(again, 'Mandando…', async () => {
@@ -237,7 +257,7 @@ function showName() {
     const name = val('cta-name').trim();
     if (!name) { setErr('Escribí un nombre.'); return; }
     await A.setDisplayName(name);
-    user = A.currentUser(); paintButton();
+    user = A.currentUser(); paintButton(); tellNube();
     ui.snack('Nombre guardado');
     showAccount();
   }));
@@ -329,7 +349,7 @@ export function initCuenta(helpers) {
         await load();
         // Si volvió del link de verificación, se actualiza el estado (sin conexión, queda como estaba).
         if (user && !user.emailVerified && navigator.onLine !== false) {
-          try { user = await A.refreshUser(); paintButton(); if (user?.emailVerified) ui.snack('Correo verificado'); } catch { /* sin conexión */ }
+          try { user = await A.refreshUser(); paintButton(); if (user?.emailVerified) { tellNube(); ui.snack('Correo verificado'); } } catch { /* sin conexión */ }
         }
       } catch (e) { console.warn('Cuenta', e); }
     }, 400);
@@ -342,3 +362,6 @@ export const nubeInfo = () => (N && user ? N.info() : null);
 export const nubeAdopt = (id) => { if (N && user) N.adopt(id); };
 export const nubeIsAccount = (id) => !!(N && user && N.isAccount(id));
 export const nubeSyncNow = () => (N && user ? N.syncNow() : Promise.resolve());
+// Compartir (v0.0.11): el módulo de la nube (null sin sesión) y abrir «Mi cuenta» (para verificar el correo)
+export const nubeMod = () => (N && user ? N : null);
+export const openAccount = () => onButton();

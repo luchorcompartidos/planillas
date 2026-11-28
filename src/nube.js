@@ -1,9 +1,15 @@
 // Nube (Etapa 2b-1, v0.0.10): las planillas propias se guardan en Firestore (proyecto notas-pro-2026, el de ANote...)
 // y se ven en todos los dispositivos con la misma cuenta. Se carga recién con la sesión iniciada (cuenta-ui.js).
+// Compartir (Etapa 2b-2a, v0.0.11): invitar por correo con permiso «Puede editar» o «Solo puede ver», como las notas
+// de ANote...; el dueño cambia permisos y quita personas; los demás pueden salir. Además, respeta «cerrar sesión en
+// todos los dispositivos» del administrador de ANote... (control/{uid}.revokedAt).
 //
 // Firestore:
-//   sheets/{id}           = { owner, memberIds: [uid], name, created, updated, rows, cols, ver, parts, size, by, at }
+//   sheets/{id}           = { owner, memberIds: [uid], roles: { uid: 'edit'|'view' }, members: { uid: { name, email } },
+//                             name, created, updated, rows, cols, ver, parts, size, by, at }
 //   sheets/{id}/parts/{n} = { d: pedazo del JSON del contenido, v: ver }   (n = 0, 1, …)
+//   sheetInvites/{id}_{correo} = { sheetId, email, role, from, fromName, fromEmail, sheetName, status, created }
+//     (las ve quien tiene ese correo, verificado; las acepta agregándose a memberIds con el permiso de la invitación)
 // El contenido (cells, styles, colW, rowH, view, vista) va aparte, en partes de hasta PART caracteres, así la lista
 // (la consulta por memberIds) baja poco y una planilla grande no pasa el límite de 1 MiB por documento.
 // `ver` sube en 1 con cada envío (transacción): si la nube tiene otra `ver` que la última que vio este dispositivo,
@@ -11,15 +17,17 @@
 //
 // En el dispositivo, la copia de trabajo sigue en IndexedDB (store.js); acá se lleva, por cuenta, qué planillas son
 // de la cuenta y en qué estado (localStorage `planillas-nube-<uid>`):
-//   { [id]: { v: última ver vista, d: hay cambios sin subir, s: contador de cambios, x: borrada acá (falta en la nube) } }
+//   { [id]: { v: última ver vista, d: hay cambios sin subir, s: contador de cambios, x: borrada acá (falta en la nube),
+//            o: dueño (solo si es de otro), r: mi permiso si es de otro ('edit' | 'view'), on: nombre del dueño,
+//            n: personas con acceso (si es más de 1), q: salir (compartida por otro, borrada acá) } }
 // Sin conexión se sigue trabajando igual; los cambios se suben al volver la conexión.
 // Hasta la Etapa 2c (sincronización por celda) no se fusiona: si la misma planilla cambió en los dos lados, queda la de
 // la nube y lo de este dispositivo pasa a una copia «(cambios de este dispositivo)».
 import {
   initializeFirestore, memoryLocalCache, doc, collection, query, where, onSnapshot, runTransaction, writeBatch,
-  getDoc, getDocs, serverTimestamp,
+  getDoc, getDocs, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove, deleteField, serverTimestamp,
 } from 'firebase/firestore';
-import { fbApp } from './cuenta.js';
+import { fbApp, currentUser } from './cuenta.js';
 import { listFiles, getFile, putFile, deleteFile, newId, setStoreHooks, takeChanged } from './store.js';
 
 const PART = 300000; // caracteres por parte: aun con acentos (hasta 3 bytes) queda por debajo de 1 MiB
@@ -28,7 +36,14 @@ const CONTENT = ['rows', 'cols', 'cells', 'styles', 'colW', 'rowH', 'view', 'vis
 
 let db = null;
 let uid = null;
-let H = null; // ayudas de main.js: flush, askUpload, remoteChanged, remoteDeleted, removedMany, conflict, error, status
+let H = null; // ayudas de main.js: flush, askUpload, remoteChanged, remoteDeleted, removedMany, conflict, error, status,
+//                shared (cambió quién tiene acceso o mi permiso), invites (lista de invitaciones), revoked (cuenta-ui.js)
+let me = null; // { uid, name, email, verified }
+let docs = new Map(); // id → datos chicos de la planilla en la nube (dueño, miembros, permisos), sin el contenido
+let invites = [];
+let unsubInv = null;
+let unsubCtl = null;
+let authTime = 0;
 let meta = null;
 let unsub = null;
 let first = true;
@@ -71,6 +86,8 @@ export async function start(user, helpers) {
   if (uid) stop();
   H = helpers;
   uid = user.uid;
+  setMe(user);
+  docs = new Map(); invites = [];
   meta = loadMeta(uid);
   first = true;
   state = { error: '', synced: false };
@@ -82,8 +99,22 @@ export async function start(user, helpers) {
   window.addEventListener('online', onOnline);
   document.addEventListener('visibilitychange', onHidden);
   listen();
+  listenInvites();
+  watchControl(user);
   schedule(0);
   await askUploadOnce();
+}
+
+function setMe(u) {
+  const email = String(u.email || '').trim().toLowerCase();
+  me = { uid: u.uid, name: (u.displayName || '').trim() || email.split('@')[0], email, verified: !!u.emailVerified };
+}
+// La cuenta cambió (verificó el correo o cambió el nombre visible): se vuelven a pedir las invitaciones.
+export function userChanged(u) {
+  if (!uid || !u || u.uid !== uid) return;
+  const was = me && me.verified;
+  setMe(u);
+  if (!was && me.verified) { stopInvites(); listenInvites(); }
 }
 
 // Para todo (sin borrar nada): sesión vencida o cerrada desde otro lado. Las planillas quedan en el dispositivo y
@@ -91,11 +122,14 @@ export async function start(user, helpers) {
 export function stop() {
   if (unsub) { try { unsub(); } catch { /* nada */ } }
   unsub = null;
+  stopInvites();
+  if (unsubCtl) { try { unsubCtl(); } catch { /* nada */ } }
+  unsubCtl = null;
   clearTimeout(timer); clearTimeout(retry);
   setStoreHooks(null);
   window.removeEventListener('online', onOnline);
   document.removeEventListener('visibilitychange', onHidden);
-  uid = null; meta = null;
+  uid = null; meta = null; docs = new Map(); invites = [];
 }
 
 // «Cerrar sesión»: intenta subir lo pendiente, para y quita del dispositivo las planillas de la cuenta (siguen en la
@@ -114,9 +148,20 @@ export async function leave() {
 // ---------- Estado para la interfaz ----------
 export function info() {
   if (!uid) return null;
-  const ids = new Set(); const dirty = new Set();
-  for (const [id, m] of Object.entries(meta)) { if (m.x) continue; ids.add(id); if (m.d) dirty.add(id); }
-  return { ids, dirty, error: state.error, synced: state.synced, offline: offline() };
+  const ids = new Set(); const dirty = new Set(); const shared = new Map();
+  for (const [id, m] of Object.entries(meta)) {
+    if (m.x) continue;
+    ids.add(id);
+    if (m.d) dirty.add(id);
+    if (m.o || m.n > 1) shared.set(id, { role: m.o ? (m.r || 'view') : 'owner', ownerName: m.on || '', n: m.n || 1 });
+  }
+  return { ids, dirty, shared, invites: invites.length, verified: !!(me && me.verified), error: state.error, synced: state.synced, offline: offline() };
+}
+// Mi permiso en una planilla de la cuenta: 'owner' (mía), 'edit' o 'view' (compartida por otro). null si no es de la cuenta.
+export function role(id) {
+  const m = uid && meta[id];
+  if (!m || m.x) return null;
+  return m.o ? (m.r || 'view') : 'owner';
 }
 export async function pending() {
   if (!uid) return 0;
@@ -124,7 +169,7 @@ export async function pending() {
   return Object.values(meta).filter((m) => m.d || m.x).length;
 }
 export function adopt(id) {
-  if (!uid || !id) return;
+  if (!uid || !id || meta[id]) return;
   meta[id] = { v: 0, d: true, s: 1 };
   saveMeta();
   schedule(0);
@@ -159,6 +204,7 @@ export async function localCount() { return uid ? (await localFiles()).length : 
 function onLocalPut(file) {
   const m = meta && meta[file.id];
   if (!m || m.x) return;
+  if (m.o && m.r !== 'edit') return; // solo puede ver: lo de acá (la vista del Reporte) no se sube
   m.d = true; m.s = (m.s || 0) + 1;
   saveMeta();
   schedule(2500); // se juntan los cambios seguidos (escribir varias celdas) en un solo envío
@@ -166,7 +212,8 @@ function onLocalPut(file) {
 function onLocalDel(id) {
   const m = meta && meta[id];
   if (!m) return;
-  if (m.v > 0) meta[id] = { v: m.v, x: true }; else delete meta[id];
+  if (m.o) meta[id] = { v: m.v, x: true, q: true, o: m.o }; // compartida por otro: borrarla acá = salir de la planilla
+  else if (m.v > 0) meta[id] = { v: m.v, x: true }; else delete meta[id];
   saveMeta();
   schedule(0);
 }
@@ -218,6 +265,7 @@ async function pushOne(id) {
   const m = meta[id];
   if (!m) return;
   if (!f) { delete meta[id]; saveMeta(); return; }
+  if (m.o && m.r !== 'edit') { m.d = false; saveMeta(); return; } // solo puede ver
   const seq = m.s;
   const body = {};
   for (const k of CONTENT) if (f[k] !== undefined) body[k] = f[k];
@@ -229,17 +277,16 @@ async function pushOne(id) {
     return;
   }
   const ref = doc(db, 'sheets', id);
-  let conflict = false; let newVer = 0;
+  let conflict = false; let gone = false; let newVer = 0; let after = null;
   await runTransaction(db, async (t) => {
-    conflict = false;
+    conflict = false; gone = false;
     const snap = await t.get(ref);
     const cur = snap.exists() ? snap.data() : null;
     const rv = cur ? cur.ver || 0 : 0;
+    if (!cur && m.o) { gone = true; return; } // era de otro y ya no está (o ya no tengo acceso): la quita la escucha
     if (cur && rv !== m.v) { conflict = true; return; }
     newVer = Math.max(rv, m.v) + 1;
-    t.set(ref, {
-      owner: cur ? cur.owner : uid,
-      memberIds: cur ? cur.memberIds : [uid],
+    const data = {
       name: f.name || '',
       created: f.created || Date.now(),
       updated: f.updated || Date.now(),
@@ -250,10 +297,16 @@ async function pushOne(id) {
       size: json.length,
       by: uid,
       at: serverTimestamp(),
-    });
+    };
+    // Si ya existe, solo se cambia el contenido (dueño, miembros y permisos quedan como están: así puede subir
+    // también quien tiene «Puede editar»).
+    if (cur) t.update(ref, data); else t.set(ref, { owner: uid, memberIds: [uid], ...data });
+    after = cur ? { owner: cur.owner, memberIds: cur.memberIds || [], roles: cur.roles || {}, members: cur.members || {}, name: data.name }
+      : { owner: uid, memberIds: [uid], roles: {}, members: {}, name: data.name };
     parts.forEach((d, i) => t.set(doc(db, 'sheets', id, 'parts', String(i)), { d, v: newVer }));
     for (let i = parts.length; i < (cur ? cur.parts || 0 : 0); i++) t.delete(doc(db, 'sheets', id, 'parts', String(i)));
   });
+  if (gone) return;
   if (conflict) {
     // Cambió en otro dispositivo: se trae la de la nube (y lo de acá queda en una copia)
     const snap = await getDoc(ref);
@@ -262,6 +315,9 @@ async function pushOne(id) {
   }
   const mm = meta && meta[id];
   if (!mm) return;
+  const had = docs.has(id);
+  if (after) docs.set(id, after);
+  if (!had && after) H.shared(id); // ya se puede compartir (la hoja «Compartir» abierta se redibuja)
   mm.v = newVer;
   if (mm.s === seq) mm.d = false;
   saveMeta();
@@ -269,6 +325,15 @@ async function pushOne(id) {
 
 async function pushDelete(id) {
   const ref = doc(db, 'sheets', id);
+  if (meta[id].q) {
+    // Compartida por otro: salir (me saco de memberIds); para los demás sigue igual
+    try { await updateDoc(ref, { memberIds: arrayRemove(uid), [`roles.${uid}`]: deleteField(), [`members.${uid}`]: deleteField() }); } catch (e) {
+      if (e?.code !== 'not-found' && e?.code !== 'permission-denied') throw e; // ya no está o ya no tenía acceso
+    }
+    delete meta[id]; docs.delete(id);
+    saveMeta();
+    return;
+  }
   const snap = await getDoc(ref);
   if (snap.exists()) {
     const ps = await getDocs(collection(db, 'sheets', id, 'parts'));
@@ -276,8 +341,13 @@ async function pushDelete(id) {
     ps.forEach((p) => b.delete(p.ref));
     b.delete(ref);
     await b.commit();
+    // Invitaciones que quedaron sin aceptar
+    try {
+      const inv = await getDocs(query(collection(db, 'sheetInvites'), where('sheetId', '==', id), where('from', '==', uid)));
+      for (const x of inv.docs) await deleteDoc(x.ref);
+    } catch (e) { console.warn('Nube: invitaciones de una planilla borrada', e); }
   }
-  delete meta[id];
+  delete meta[id]; docs.delete(id);
   saveMeta();
 }
 
@@ -328,9 +398,39 @@ async function fetchContent(id, d) {
   return null;
 }
 
+// Dueño, miembros y mi permiso, para la interfaz y para saber qué se puede subir
+function shareBits(d) {
+  const o = d.owner && d.owner !== uid ? d.owner : undefined;
+  const mem = d.members || {};
+  const n = (d.memberIds || []).length;
+  return { o, r: o ? ((d.roles || {})[uid] === 'edit' ? 'edit' : 'view') : undefined, on: o ? (mem[o]?.name || mem[o]?.email || '') : undefined, n: n > 1 ? n : undefined };
+}
+function applyShare(m, d) {
+  const b = shareBits(d);
+  let ch = false;
+  for (const k of ['o', 'r', 'on', 'n']) {
+    if (m[k] !== b[k]) { ch = true; if (b[k] === undefined) delete m[k]; else m[k] = b[k]; }
+  }
+  return ch;
+}
 async function remoteDoc(id, d) {
+  docs.set(id, { owner: d.owner, memberIds: d.memberIds || [], roles: d.roles || {}, members: d.members || {}, name: d.name || '' });
   const m0 = meta[id];
   if (m0 && m0.x) return; // se borró acá: la nube se borra en el próximo envío
+  if (m0) {
+    const wasEdit = !m0.o || m0.r === 'edit';
+    if (applyShare(m0, d)) {
+      // Me pasaron a «Solo puede ver» con cambios sin subir: lo de acá queda en una copia mía
+      if (wasEdit && m0.o && m0.r !== 'edit' && m0.d) {
+        await H.flush();
+        const local = await getFile(id);
+        if (local) await keepCopy(local, `${local.name} (mis cambios)`);
+        m0.d = false; m0.v = 0; // se vuelve a bajar la de la nube
+      }
+      saveMeta();
+      H.shared(id);
+    }
+  }
   if (m0 && (d.ver || 0) <= m0.v) return; // ya la tenemos (o es lo que mandó este mismo dispositivo)
   const content = await fetchContent(id, d);
   if (!content || !uid) return;
@@ -340,30 +440,173 @@ async function remoteDoc(id, d) {
   const local = await getFile(id);
   if (m && m.d && local) {
     // Cambió en los dos lados: lo de este dispositivo queda en una copia (hasta la Etapa 2c, que fusiona por celda)
-    const copy = { ...JSON.parse(JSON.stringify(local)), id: newId(), name: `${local.name} (cambios de este dispositivo)`, updated: Date.now() };
-    meta[copy.id] = { v: 0, d: true, s: 1 };
-    saveMeta();
-    await putFile(copy, true);
+    const copy = await keepCopy(local, `${local.name} (cambios de este dispositivo)`);
     H.conflict(local.name, copy.name);
-    schedule(0);
   }
   const file = { id, name: d.name || 'Planilla', created: d.created || Date.now(), updated: d.updated || Date.now(), ...content };
   if (local && local.view) file.view = local.view; // la vista (Reporte, Ficha, Grilla) es de cada dispositivo
   await putFile(file, true);
   meta[id] = { v: d.ver || 0, d: false, s: 0 };
+  applyShare(meta[id], d);
   saveMeta();
-  H.remoteChanged(id, !local);
+  const mem = d.members || {};
+  const by = d.by && d.by !== uid ? (mem[d.by]?.name || mem[d.by]?.email || 'otra persona') : null;
+  H.remoteChanged(id, !local, by);
+}
+// Copia mía (nueva, en la cuenta) de una planilla, para no perder lo de este dispositivo
+async function keepCopy(local, name) {
+  const copy = { ...JSON.parse(JSON.stringify(local)), id: newId(), name, updated: Date.now() };
+  meta[copy.id] = { v: 0, d: true, s: 1 };
+  saveMeta();
+  await putFile(copy, true);
+  schedule(0);
+  return copy;
 }
 
 async function remoteRemoved(id) {
   const m = meta[id];
   if (!m || m.x) return;
   await H.flush();
+  docs.delete(id);
+  if (meta[id] && meta[id].o) {
+    // Compartida por otro: me sacaron el acceso o el dueño la borró. Si había cambios sin subir, quedan en una copia mía.
+    const local = await getFile(id);
+    let copy = null;
+    if (meta[id].d && local) copy = await keepCopy(local, `${local.name} (mis cambios)`);
+    delete meta[id];
+    saveMeta();
+    await deleteFile(id, true);
+    H.remoteDeleted(id, { unshared: true, name: local ? local.name : '', copy: copy ? copy.name : '' });
+    return;
+  }
   if (meta[id] && meta[id].d) { meta[id] = { v: 0, d: true, s: 1 }; saveMeta(); schedule(0); return; } // con cambios: se vuelve a subir
   delete meta[id];
   saveMeta();
   await deleteFile(id, true);
   H.remoteDeleted(id);
+}
+
+// ---------- Compartir (v0.0.11) ----------
+const need = () => { if (!uid) throw Object.assign(new Error('Sin sesión'), { code: 'unauthenticated' }); if (offline()) throw Object.assign(new Error('Sin conexión'), { code: 'unavailable' }); };
+const ROLES = ['edit', 'view'];
+
+// Quién tiene acceso a una planilla de la cuenta (para la hoja «Compartir»)
+export function shareInfo(id) {
+  const m = uid && meta[id];
+  if (!m || m.x) return null;
+  const d = docs.get(id);
+  const r = m.o ? (m.r || 'view') : 'owner';
+  const people = [];
+  if (d) {
+    for (const u of d.memberIds) {
+      const x = d.members[u] || {};
+      const self = u === uid;
+      people.push({
+        uid: u, me: self, role: u === d.owner ? 'owner' : (d.roles[u] === 'edit' ? 'edit' : 'view'),
+        name: x.name || (self ? me.name : ''), email: x.email || (self ? me.email : ''),
+      });
+    }
+    people.sort((a, b) => (a.role === 'owner' ? -1 : b.role === 'owner' ? 1 : 0));
+  }
+  return { role: r, uploaded: !!d && m.v > 0, people, verified: !!me.verified, myEmail: me.email };
+}
+
+export async function invite(id, email, r) {
+  need();
+  const e = String(email || '').trim().toLowerCase();
+  const d = docs.get(id);
+  if (!d || d.owner !== uid) throw Object.assign(new Error('Solo el dueño invita'), { code: 'permission-denied' });
+  if (!ROLES.includes(r)) r = 'view';
+  const ref = doc(db, 'sheets', id);
+  // El dueño queda con nombre y correo en la planilla, para que lo vean los demás
+  const mine = d.members[uid];
+  if (!mine || mine.name !== me.name || mine.email !== me.email) {
+    await updateDoc(ref, { [`members.${uid}`]: { name: me.name, email: me.email } });
+    d.members[uid] = { name: me.name, email: me.email };
+  }
+  await setDoc(doc(db, 'sheetInvites', `${id}_${e}`), {
+    sheetId: id, email: e, role: r, from: uid, fromName: me.name, fromEmail: me.email,
+    sheetName: d.name || '', status: 'pending', created: Date.now(),
+  });
+}
+// Invitaciones sin aceptar de una planilla mía (las ve solo quien invitó). cb(lista); devuelve cómo dejar de escuchar.
+export function watchSheetInvites(id, cb) {
+  if (!uid) { cb([]); return () => {}; }
+  return onSnapshot(query(collection(db, 'sheetInvites'), where('sheetId', '==', id), where('from', '==', uid)),
+    (s) => cb(s.docs.map((x) => ({ id: x.id, ...x.data() })).filter((i) => i.status === 'pending')),
+    (e) => { console.warn('Nube: invitaciones de la planilla', e); cb([]); });
+}
+export async function cancelInvite(inviteId) { need(); await deleteDoc(doc(db, 'sheetInvites', inviteId)); }
+export async function setRole(id, u, r) {
+  need();
+  if (!ROLES.includes(r)) return;
+  await updateDoc(doc(db, 'sheets', id), { [`roles.${u}`]: r });
+}
+export async function removeMember(id, u) {
+  need();
+  await updateDoc(doc(db, 'sheets', id), { memberIds: arrayRemove(u), [`roles.${u}`]: deleteField(), [`members.${u}`]: deleteField() });
+}
+
+// Invitaciones para mí (necesitan el correo verificado: las reglas no dejan verlas sin eso)
+function listenInvites() {
+  if (unsubInv || !uid) return;
+  if (!me.verified || !me.email) { invites = []; if (H) H.invites(invites); return; }
+  const u = uid;
+  let refreshed = false;
+  const go = () => {
+    unsubInv = onSnapshot(query(collection(db, 'sheetInvites'), where('email', '==', me.email)), (s) => {
+      if (uid !== u) return;
+      const all = s.docs.map((x) => ({ id: x.id, ...x.data() })).filter((i) => i.status === 'pending');
+      // Ya aceptada (por ejemplo, desde otro dispositivo): la invitación sobra
+      all.filter((i) => docs.has(i.sheetId)).forEach((i) => { deleteDoc(doc(db, 'sheetInvites', i.id)).catch(() => {}); });
+      invites = all.filter((i) => !docs.has(i.sheetId));
+      H.invites(invites);
+    }, async (e) => {
+      unsubInv = null;
+      console.warn('Nube: invitaciones', e);
+      // Recién verificado: el token todavía no lo sabe. Se renueva una vez y se vuelve a intentar.
+      if (e?.code === 'permission-denied' && !refreshed) {
+        refreshed = true;
+        try { await currentUser()?.getIdToken(true); } catch { /* nada */ }
+        if (uid === u && !unsubInv) go();
+        return;
+      }
+      setTimeout(() => { if (uid === u && !unsubInv) listenInvites(); }, 60000);
+    });
+  };
+  go();
+}
+function stopInvites() { if (unsubInv) { try { unsubInv(); } catch { /* nada */ } } unsubInv = null; }
+export const invitesList = () => invites.slice();
+
+export async function acceptInvite(inv) {
+  need();
+  const ref = doc(db, 'sheets', inv.sheetId);
+  if (!docs.has(inv.sheetId)) {
+    try {
+      await updateDoc(ref, { memberIds: arrayUnion(uid), [`roles.${uid}`]: inv.role === 'edit' ? 'edit' : 'view', [`members.${uid}`]: { name: me.name, email: me.email } });
+    } catch (e) {
+      if (e?.code === 'not-found') { await deleteDoc(doc(db, 'sheetInvites', inv.id)).catch(() => {}); throw Object.assign(new Error('La planilla ya no existe'), { code: 'gone' }); }
+      throw e;
+    }
+  }
+  await deleteDoc(doc(db, 'sheetInvites', inv.id));
+}
+export async function declineInvite(inv) { need(); await deleteDoc(doc(db, 'sheetInvites', inv.id)); }
+
+// ---------- «Cerrar sesión en todos los dispositivos» del administrador de ANote... (control/{uid}.revokedAt) ----------
+// Solo se lee (las reglas de ANote... dejan que cada uno lea el suyo). Si el pedido es posterior al inicio de esta
+// sesión y viene del servidor (no de una copia), se cierra la sesión.
+const tsMs = (t) => (t == null ? 0 : typeof t === 'number' ? t : typeof t.toMillis === 'function' ? t.toMillis() : (t.seconds || 0) * 1000);
+async function watchControl(user) {
+  const u = user.uid;
+  try { authTime = Date.parse((await user.getIdTokenResult()).authTime) || 0; } catch { authTime = 0; }
+  if (uid !== u || unsubCtl) return;
+  unsubCtl = onSnapshot(doc(db, 'control', u), { includeMetadataChanges: true }, (snap) => {
+    if (uid !== u || !snap.exists()) return;
+    const rev = tsMs(snap.data().revokedAt);
+    if (rev && authTime && rev > authTime && !(snap.metadata && snap.metadata.fromCache) && H && H.revoked) H.revoked();
+  }, (e) => console.warn('Nube: pedidos del administrador', e));
 }
 
 // ---------- Errores ----------
