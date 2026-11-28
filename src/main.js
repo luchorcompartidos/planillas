@@ -1,19 +1,25 @@
-// Planillas — Etapa 1d-2: en el Reporte, agrupar (subtotales y grupos plegables) y "Configurar vista" completa
+// Planillas — Etapa 1e: edición más cómoda. Grilla: escribir en la celda misma (segundo toque o doble toque),
+// ancho de columnas y alto de filas arrastrando el borde del encabezado (doble toque = ajustar), elegir rangos
+// (mantener apretado y arrastrar, encabezados, Mayús) y copiar / cortar / pegar (también desde y hacia Excel o
+// Sheets, como texto con tabuladores). Reporte: mantener apretada una celda para cambiar su valor.
+// Sobre la 1d-2: en el Reporte, agrupar (subtotales y grupos plegables) y "Configurar vista" completa
 // (apariencia, columnas, etiquetas y sus colores, filtros, orden, grupos y total), guardada en sheet.vista.
 // Pestañas: Reporte (por defecto), Ficha, Grilla.
 // Sobre la 1d-1b: en el Reporte, etiquetas de color, buscador, filtros rápidos y ordenar por columna.
 // Sobre la 1d-1a: vista Reporte (tabla presentable) y selector Grilla / Reporte / Ficha.
 // Sobre lo de la 1c (importar y exportar .xlsx y .csv) y la 1b (grilla completa, Ficha, archivos).
-// Grilla: tocar para seleccionar y otra vez para editar en la barra de fórmula; insertar y borrar
+// Grilla: tocar para seleccionar y otra vez para escribir (desde la 1e, en la celda misma); insertar y borrar
 // filas/columnas en el medio (menú de celda: mantener apretado, clic derecho o "Más…").
 // Ficha: un registro por pantalla (fila 1 = nombres de campo). Archivos guardados en IndexedDB.
-// Formato (de lo importado): negrita, colores, alineación, bordes, anchos y altos; todavía no se edita.
+// Formato (de lo importado): negrita, colores, alineación, bordes, anchos y altos; desde la 1e se editan anchos y altos.
 // Reporte: solo hasta la última fila y columna con datos, franjas, encabezado (fila 1) destacado, primera
 // columna fija, barra de total y tema oscuro (por defecto) / claro / sistema. Tocar una fila abre la Ficha.
 // Cada planilla recuerda su vista (sheet.view); las importadas abren en Reporte.
 import './styles.css';
 import { APP_VERSION, CHANGELOG_URL, getLatestRelease, isNewer, formatDate } from './version.js';
-import { initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile } from './native.js';
+import {
+  initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile, clipboardWrite, clipboardRead,
+} from './native.js';
 import { colName, parseRef, ref, isNum } from './refs.js';
 import { importAny, ImportError, toXlsx, toCsv, safeName, toNumber } from './transfer.js';
 import {
@@ -207,13 +213,13 @@ function render() {
   for (let c = 0; c < sheet.cols; c++) {
     const w = colW[c] != null ? colPx(colW[c]) : 0;
     wCss[c] = w ? `width:${w}px;min-width:${w}px;max-width:${w}px;` : '';
-    h += `<th data-c="${c}"${w ? ` style="${wCss[c]}"` : ''}>${colName(c)}</th>`;
+    h += `<th data-c="${c}"${w ? ` style="${wCss[c]}"` : ''}>${colName(c)}<span class="rz rz-c" data-rzc="${c}" aria-hidden="true"></span></th>`;
   }
   h += '</tr></thead><tbody>';
   for (let r = 0; r < sheet.rows; r++) {
     const hp = rowH[r] != null ? rowPx(rowH[r]) : 0;
     const hCss = hp ? `height:${hp}px;max-height:${hp}px;` : '';
-    h += `<tr><th data-r="${r}"${hp ? ` style="${hCss}"` : ''}>${r + 1}</th>`;
+    h += `<tr><th data-r="${r}"${hp ? ` style="${hCss}"` : ''}>${r + 1}<span class="rz rz-r" data-rzr="${r}" aria-hidden="true"></span></th>`;
     for (let c = 0; c < sheet.cols; c++) {
       const v = getCell(r, c);
       const css = wCss[c] + hCss + cellCss(styles[ref(r, c)], !!hp);
@@ -234,19 +240,40 @@ function paintCell(r, c) {
   td.classList.toggle('num', isNum(v));
 }
 
+// ---------- Selección: celda activa (sel) y rango hasta "far" (1e-2) ----------
+// sel = celda activa (la que se edita y muestra la barra de fórmula); far = la otra punta del rango.
+// Con una sola celda, far = sel. El rango es el rectángulo entre las dos.
+let far = { r: 0, c: 0 };
+const rect = () => ({ r1: Math.min(sel.r, far.r), r2: Math.max(sel.r, far.r), c1: Math.min(sel.c, far.c), c2: Math.max(sel.c, far.c) });
+const isRange = () => sel.r !== far.r || sel.c !== far.c;
+const rectName = (R = rect()) => (R.r1 === R.r2 && R.c1 === R.c2 ? ref(R.r1, R.c1) : `${ref(R.r1, R.c1)}:${ref(R.r2, R.c2)}`);
+const inRect = (r, c, R = rect()) => r >= R.r1 && r <= R.r2 && c >= R.c1 && c <= R.c2;
+
 function paintSelection() {
-  grid.querySelectorAll('.sel, .on, .editing').forEach((el) => el.classList.remove('sel', 'on', 'editing'));
+  grid.querySelectorAll('.sel, .on, .on-r, .editing, .rng').forEach((el) => el.classList.remove('sel', 'on', 'on-r', 'editing', 'rng'));
+  const R = rect();
+  const body = grid.tBodies[0];
+  const head = grid.tHead?.rows[0];
+  if (isRange() && body) {
+    for (let r = R.r1; r <= R.r2; r++) {
+      const tr = body.rows[r];
+      if (!tr) continue;
+      tr.cells[0]?.classList.add('on-r');
+      for (let c = R.c1; c <= R.c2; c++) tr.cells[c + 1]?.classList.add('rng');
+    }
+    for (let c = R.c1; c <= R.c2; c++) head?.cells[c + 1]?.classList.add('on-r');
+  }
   const td = cellEl(sel.r, sel.c);
   if (td) { td.classList.add('sel'); td.classList.toggle('editing', editing); }
-  grid.tHead?.rows[0].cells[sel.c + 1]?.classList.add('on');
-  grid.tBodies[0]?.rows[sel.r]?.cells[0]?.classList.add('on');
-  nameBox.value = ref(sel.r, sel.c);
+  head?.cells[sel.c + 1]?.classList.add('on');
+  body?.rows[sel.r]?.cells[0]?.classList.add('on');
+  if (document.activeElement !== nameBox) nameBox.value = rectName(R);
   if (!editing) formula.value = getCell(sel.r, sel.c);
 }
 
-// Lleva la celda elegida a la vista, sin que la tapen los encabezados fijos
-function scrollToSel() {
-  const td = cellEl(sel.r, sel.c);
+// Lleva una celda (por defecto la activa) a la vista, sin que la tapen los encabezados fijos
+function scrollToSel(t = sel) {
+  const td = cellEl(t.r, t.c);
   if (!td) return;
   const headH = grid.tHead.offsetHeight;
   const numW = grid.tBodies[0].rows[0].cells[0].offsetWidth;
@@ -257,7 +284,8 @@ function scrollToSel() {
   else if (left + td.offsetWidth > wrap.scrollLeft + wrap.clientWidth) wrap.scrollLeft = left + td.offsetWidth - wrap.clientWidth;
 }
 
-function select(r, c, { scroll = true } = {}) {
+// extend: mueve solo la otra punta del rango (Mayús + flechas, arrastrar); si no, una sola celda.
+function select(r, c, { scroll = true, extend = false } = {}) {
   if (editing) commit();
   r = Math.max(0, r); c = Math.max(0, c);
   // Ir más allá del final agrega filas/columnas (como en una planilla)
@@ -265,27 +293,60 @@ function select(r, c, { scroll = true } = {}) {
   if (r >= sheet.rows) { sheet.rows = r + 1; grow = true; }
   if (c >= sheet.cols) { sheet.cols = c + 1; grow = true; }
   if (grow) { save(); render(); }
-  sel = { r, c };
+  if (extend) far = { r, c }; else { sel = { r, c }; far = { r, c }; }
   paintSelection();
-  if (scroll) scrollToSel();
+  if (scroll) scrollToSel(extend ? far : sel);
 }
+// Rango completo (activa arriba a la izquierda), por ejemplo una columna o una fila entera
+function selectRect(r1, c1, r2, c2) {
+  if (editing) commit();
+  sel = { r: r1, c: c1 }; far = { r: Math.min(r2, sheet.rows - 1), c: Math.min(c2, sheet.cols - 1) };
+  paintSelection();
+}
+const selectCol = (c) => selectRect(0, c, sheet.rows - 1, c);
+const selectRow = (r) => selectRect(r, 0, r, sheet.cols - 1);
+const selectAll = () => selectRect(0, 0, sheet.rows - 1, sheet.cols - 1);
 
 // ---------- Edición en la grilla ----------
-function startEdit(initial) {
-  if (!editing) { editing = true; original = getCell(sel.r, sel.c); }
+// Se escribe en la celda misma (cuadro "cell-ed" encima de la celda, 1e-1) o en la barra de fórmula;
+// los dos quedan sincronizados. formula.value tiene siempre el texto en edición.
+const cellEd = $('cell-ed');
+function focusEnd(el) {
+  el.focus({ preventScroll: el === cellEd });
+  const n = el.value.length;
+  try { el.setSelectionRange(n, n); } catch { /* tipo de campo sin selección */ }
+}
+function placeEditor() {
+  const td = cellEl(sel.r, sel.c);
+  if (!td) return;
+  const w = Math.max(td.offsetWidth, Math.min(180, wrap.clientWidth - 60));
+  cellEd.style.left = `${grid.offsetLeft + td.offsetLeft}px`;
+  cellEd.style.top = `${grid.offsetTop + td.offsetTop}px`;
+  cellEd.style.width = `${w}px`;
+  cellEd.style.height = `${Math.max(td.offsetHeight, 28)}px`;
+  cellEd.style.textAlign = td.classList.contains('num') && !cellEd.value ? 'right' : 'left';
+}
+function startEdit(initial, where = 'cell') {
+  if (!editing) { editing = true; original = getCell(sel.r, sel.c); formula.value = original; }
   if (typeof initial === 'string') { formula.value = initial; liveUpdate(); }
+  cellEd.value = formula.value;
   paintSelection();
-  formula.focus();
-  const n = formula.value.length;
-  try { formula.setSelectionRange(n, n); } catch { /* tipo de campo sin selección */ }
+  if (where === 'cell') {
+    scrollToSel();
+    cellEd.hidden = false;
+    placeEditor();
+    focusEnd(cellEd);
+  } else focusEnd(formula);
 }
 function liveUpdate() {
   const td = cellEl(sel.r, sel.c);
   if (td) { td.textContent = formula.value; td.classList.toggle('num', isNum(formula.value)); }
 }
+function hideEditor() { if (!cellEd.hidden) { cellEd.hidden = true; cellEd.value = ''; } }
 function commit() {
   if (!editing) return;
   editing = false;
+  hideEditor();
   setCell(sel.r, sel.c, formula.value);
   paintCell(sel.r, sel.c);
   paintSelection();
@@ -293,78 +354,119 @@ function commit() {
 function cancel() {
   if (!editing) return;
   editing = false;
+  hideEditor();
   formula.value = original;
   paintCell(sel.r, sel.c);
   paintSelection();
 }
 
+let ignoreClick = 0; // después de arrastrar (rango o ancho), el clic que sigue no cuenta
 grid.addEventListener('click', (e) => {
+  if (Date.now() < ignoreClick || e.target.closest('.rz')) return;
   const td = e.target.closest('td');
   if (td) {
     const r = +td.dataset.r; const c = +td.dataset.c;
-    const same = r === sel.r && c === sel.c && !editing;
+    if (e.shiftKey) { select(r, c, { scroll: false, extend: true }); return; }
+    const same = r === sel.r && c === sel.c && !editing && !isRange();
     select(r, c, { scroll: false });
-    if (same) startEdit(); // segundo toque en la misma celda: editar
+    if (same) startEdit(); // segundo toque en la misma celda: escribir en la celda
     else if (!isTouch) wrap.focus({ preventScroll: true });
     return;
   }
   const th = e.target.closest('th');
-  if (th && th.dataset.c != null) select(sel.r, +th.dataset.c);
-  else if (th && th.dataset.r != null) select(+th.dataset.r, sel.c);
+  if (!th) return;
+  // Tocar el encabezado elige la columna o la fila entera; la esquina, toda la planilla
+  if (th.classList.contains('corner')) selectAll();
+  else if (th.dataset.c != null) selectCol(+th.dataset.c);
+  else if (th.dataset.r != null) selectRow(+th.dataset.r);
+  if (!isTouch) wrap.focus({ preventScroll: true });
 });
-grid.addEventListener('dblclick', (e) => { if (e.target.closest('td')) startEdit(); });
+grid.addEventListener('dblclick', (e) => { if (e.target.closest('td') && !editing) startEdit(); });
 // Menú de celda: mantener apretado (celular) o clic derecho (PC), sobre una celda o un encabezado
+let menuAt = 0;
 grid.addEventListener('contextmenu', (e) => {
   const cell = e.target.closest('td, th');
   if (!cell) return;
   e.preventDefault();
+  if (drag || rz || e.target.closest('.rz')) return; // arrastrando: no hay menú
+  if (cell.classList.contains('corner')) return;
+  menuAt = Date.now();
+  const isTh = cell.tagName === 'TH';
   const r = cell.dataset.r != null ? +cell.dataset.r : sel.r;
   const c = cell.dataset.c != null ? +cell.dataset.c : sel.c;
-  if (cell.classList.contains('corner')) return;
-  select(r, c, { scroll: false });
-  openCellMenu(cell.tagName === 'TH' ? (cell.dataset.r != null ? 'fila' : 'columna') : 'celda');
+  const R = rect();
+  // Dentro del rango elegido, el menú actúa sobre el rango; si no, sobre lo tocado
+  if (isTh && cell.dataset.c != null) { if (!(R.c1 <= c && c <= R.c2 && R.r1 === 0 && R.r2 === sheet.rows - 1)) selectCol(c); } else if (isTh) { if (!(R.r1 <= r && r <= R.r2 && R.c1 === 0 && R.c2 === sheet.cols - 1)) selectRow(r); } else if (!inRect(r, c, R)) select(r, c, { scroll: false });
+  openCellMenu(isTh ? (cell.dataset.r != null ? 'fila' : 'columna') : 'celda');
 });
 let isTouch = false;
 window.addEventListener('touchstart', () => { isTouch = true; }, { passive: true, once: true });
 
-formula.addEventListener('focus', () => { if (!editing) { editing = true; original = getCell(sel.r, sel.c); paintSelection(); } });
-formula.addEventListener('input', liveUpdate);
-formula.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); commit(); select(sel.r + 1, sel.c); if (isTouch) startEdit(); else wrap.focus({ preventScroll: true }); }
-  else if (e.key === 'Tab') { e.preventDefault(); commit(); select(sel.r, sel.c + (e.shiftKey ? -1 : 1)); wrap.focus({ preventScroll: true }); }
-  else if (e.key === 'Escape') { e.preventDefault(); cancel(); wrap.focus({ preventScroll: true }); }
+// Teclas compartidas por la barra de fórmula y el cuadro de la celda
+function editKeys(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault(); commit(); select(sel.r + 1, sel.c);
+    if (isTouch) startEdit(undefined, e.target === formula ? 'formula' : 'cell'); else wrap.focus({ preventScroll: true });
+  } else if (e.key === 'Tab') { e.preventDefault(); commit(); select(sel.r, sel.c + (e.shiftKey ? -1 : 1)); wrap.focus({ preventScroll: true }); } else if (e.key === 'Escape') { e.preventDefault(); cancel(); wrap.focus({ preventScroll: true }); }
+}
+// Al salir de los dos campos (no al pasar de uno al otro) se guarda
+const editBlur = () => setTimeout(() => {
+  const a = document.activeElement;
+  if (editing && a !== formula && a !== cellEd) commit();
+}, 0);
+formula.addEventListener('focus', () => {
+  if (!editing) { editing = true; original = getCell(sel.r, sel.c); formula.value = original; paintSelection(); }
 });
-formula.addEventListener('blur', () => commit());
+formula.addEventListener('input', () => { if (!cellEd.hidden) cellEd.value = formula.value; liveUpdate(); });
+formula.addEventListener('keydown', editKeys);
+formula.addEventListener('blur', editBlur);
+cellEd.addEventListener('input', () => { formula.value = cellEd.value; liveUpdate(); });
+cellEd.addEventListener('keydown', editKeys);
+cellEd.addEventListener('blur', editBlur);
 
 nameBox.addEventListener('focus', () => nameBox.select());
 nameBox.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault();
-  const p = parseRef(nameBox.value);
-  if (!p) { snack('Referencia no válida (ej.: B12)'); return; }
-  if (p.r > 9999 || p.c > 701) { snack('Fuera del tamaño permitido'); return; }
-  select(p.r, p.c);
+  // Una celda (B12) o un rango (A1:C5)
+  const [a, b] = nameBox.value.trim().split(':');
+  const p = parseRef(a || ''); const q = b ? parseRef(b) : p;
+  if (!p || !q) { snack('Referencia no válida (ej.: B12 o A1:C5)'); return; }
+  if (Math.max(p.r, q.r) > 9999 || Math.max(p.c, q.c) > 701) { snack('Fuera del tamaño permitido'); return; }
   nameBox.blur();
+  select(p.r, p.c);
+  if (b) select(q.r, q.c, { extend: true });
 });
-nameBox.addEventListener('blur', () => { nameBox.value = ref(sel.r, sel.c); });
+nameBox.addEventListener('blur', () => { nameBox.value = rectName(); });
 
-// Teclado físico (PC o tablet con teclado): flechas, Enter/F2 para editar, Supr para borrar, escribir reemplaza
+// Teclado físico (PC o tablet con teclado): flechas (con Mayús, rango), Enter/F2 para editar, Supr para borrar,
+// Ctrl+A para elegir todo; escribir reemplaza. Copiar/cortar/pegar: eventos copy/cut/paste (más abajo).
 wrap.addEventListener('keydown', (e) => {
-  if (editing || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (editing || e.target !== wrap) return;
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-  if (moves[e.key]) { e.preventDefault(); select(sel.r + moves[e.key][0], sel.c + moves[e.key][1]); }
-  else if (e.key === 'Tab') { e.preventDefault(); select(sel.r, sel.c + (e.shiftKey ? -1 : 1)); }
-  else if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(); }
-  else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearCell(); }
-  else if (e.key === 'ContextMenu') { e.preventDefault(); openCellMenu('celda'); }
-  else if (e.key.length === 1) { e.preventDefault(); startEdit(e.key); }
+  if (moves[e.key]) {
+    e.preventDefault();
+    const [dr, dc] = moves[e.key];
+    if (e.shiftKey) select(far.r + dr, far.c + dc, { extend: true }); else select(sel.r + dr, sel.c + dc);
+  } else if (e.key === 'Tab') { e.preventDefault(); select(sel.r, sel.c + (e.shiftKey ? -1 : 1)); } else if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(); } else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearCell(); } else if (e.key === 'ContextMenu') { e.preventDefault(); openCellMenu('celda'); } else if (e.key === 'Escape' && isRange()) { e.preventDefault(); select(sel.r, sel.c, { scroll: false }); } else if (e.key.length === 1) { e.preventDefault(); startEdit(e.key); }
 });
 
+// Borrar el contenido de la celda o del rango (el formato queda, como Supr en Excel)
 function clearCell() {
   if (editing) cancel();
-  setCell(sel.r, sel.c, '');
-  paintCell(sel.r, sel.c);
-  paintSelection();
+  if (!isRange()) {
+    setCell(sel.r, sel.c, '');
+    paintCell(sel.r, sel.c);
+    paintSelection();
+    return;
+  }
+  const R = rect(); const keep = { sel, far };
+  withUndo(`Borrado ${rectName(R)}`, () => {
+    for (const k of Object.keys(sheet.cells)) { const p = parseRef(k); if (p && inRect(p.r, p.c, R)) delete sheet.cells[k]; }
+  });
+  sel = keep.sel; far = keep.far; paintSelection();
 }
 
 // ---------- Botones ----------
@@ -374,33 +476,378 @@ function tool(id, fn) {
   b.addEventListener('pointerdown', (e) => e.preventDefault());
   b.addEventListener('click', fn);
 }
-tool('btn-add-row', () => { commit(); sheet.rows++; save(); render(); select(sheet.rows - 1, sel.c); });
-tool('btn-add-col', () => { commit(); sheet.cols++; save(); render(); select(sel.r, sheet.cols - 1); });
+const addRowEnd = () => { commit(); sheet.rows++; save(); render(); select(sheet.rows - 1, sel.c); };
+const addColEnd = () => { commit(); sheet.cols++; save(); render(); select(sel.r, sheet.cols - 1); };
+tool('btn-copy', () => copySel(false));
+tool('btn-cut', () => copySel(true));
+tool('btn-paste', () => pasteSel());
 tool('btn-clear', clearCell);
 tool('btn-more', () => openCellMenu('celda'));
 
 function openCellMenu(focus) {
   commit();
   const { r, c } = sel;
+  const R = rect(); const multi = isRange();
+  const nR = R.r2 - R.r1 + 1; const nC = R.c2 - R.c1 + 1;
+  const colsTxt = nC > 1 ? `columnas ${colName(R.c1)}:${colName(R.c2)}` : `columna ${colName(c)}`;
+  const rowsTxt = nR > 1 ? `filas ${R.r1 + 1}:${R.r2 + 1}` : `fila ${r + 1}`;
   const fila = [
     { label: 'Insertar fila arriba', fn: () => insertRow(r) },
     { label: 'Insertar fila abajo', fn: () => insertRow(r + 1) },
+    { label: 'Agregar fila al final', fn: addRowEnd },
+    { label: `Alto de ${rowsTxt}…`, fn: () => askSize('r', R.r1, R.r2) },
+    { label: 'Alto normal', fn: () => resetSize('r', R.r1, R.r2), disabled: !rangeHas(sheet.rowH, R.r1, R.r2) },
     { label: `Borrar fila ${r + 1}`, fn: () => deleteRow(r), danger: true },
   ];
   const col = [
     { label: 'Insertar columna a la izquierda', fn: () => insertCol(c) },
     { label: 'Insertar columna a la derecha', fn: () => insertCol(c + 1) },
+    { label: 'Agregar columna al final', fn: addColEnd },
+    { label: `Ancho de ${colsTxt}…`, fn: () => askSize('c', R.c1, R.c2) },
+    { label: 'Ajustar ancho al contenido', fn: () => autoFit(R.c1, R.c2) },
+    { label: 'Ancho normal', fn: () => resetSize('c', R.c1, R.c2), disabled: !rangeHas(sheet.colW, R.c1, R.c2) },
     { label: `Borrar columna ${colName(c)}`, fn: () => deleteCol(c), danger: true },
   ];
   const celda = [
-    { label: `Borrar contenido de ${ref(r, c)}`, fn: clearCell, disabled: !getCell(r, c) },
+    { label: `Copiar ${rectName(R)}`, fn: () => copySel(false) },
+    { label: `Cortar ${rectName(R)}`, fn: () => copySel(true) },
+    { label: `Pegar en ${multi ? rectName(R) : ref(r, c)}`, fn: () => pasteSel() },
+    { label: `Borrar contenido de ${rectName(R)}`, fn: clearCell, disabled: !multi && !getCell(r, c) },
+    { label: 'Seleccionar todo', fn: selectAll },
     { label: r >= 1 ? `Ver fila ${r + 1} como ficha` : 'Ver como ficha', fn: () => setView('ficha') },
   ];
-  const items = focus === 'columna' ? [...col, '-', ...fila, '-', ...celda]
-    : focus === 'fila' ? [...fila, '-', ...col, '-', ...celda]
+  const items = focus === 'columna' ? [...col, '-', ...celda, '-', ...fila]
+    : focus === 'fila' ? [...fila, '-', ...celda, '-', ...col]
       : [...celda, '-', ...fila, '-', ...col];
-  showMenu(focus === 'columna' ? `Columna ${colName(c)}` : focus === 'fila' ? `Fila ${r + 1}` : `Celda ${ref(r, c)}`, items);
+  const what = focus === 'columna' ? (nC > 1 ? `Columnas ${colName(R.c1)}:${colName(R.c2)}` : `Columna ${colName(c)}`)
+    : focus === 'fila' ? (nR > 1 ? `Filas ${R.r1 + 1}:${R.r2 + 1}` : `Fila ${r + 1}`) : multi ? `Rango ${rectName(R)}` : `Celda ${ref(r, c)}`;
+  showMenu(what, items);
 }
+
+// ---------- Ancho de columnas y alto de filas (1e-1) ----------
+// Arrastrando el borde derecho del encabezado de la columna (o el de abajo del número de fila);
+// doble toque en ese borde = ajustar al contenido (columna) o volver al alto normal (fila).
+// Se guarda en colW (caracteres de Excel) y rowH (puntos), lo mismo que se exporta al .xlsx.
+const DEF_W = 96; const DEF_H = 28; const MIN_W = 24; const MIN_H = 16; const MAX_PX = 900;
+const pxToW = (px) => Math.round(((px - 5) / 7) * 100) / 100;
+const pxToH = (px) => Math.round(((px * 3) / 4) * 100) / 100;
+const curColPx = (c) => (sheet.colW[c] != null ? colPx(sheet.colW[c]) : DEF_W);
+const curRowPx = (r) => (sheet.rowH[r] != null ? rowPx(sheet.rowH[r]) : DEF_H);
+const rangeHas = (obj, a, b) => Object.keys(obj || {}).some((k) => +k >= a && +k <= b);
+function applyColPx(c, px) {
+  const set = (el) => { if (el) { el.style.width = `${px}px`; el.style.minWidth = `${px}px`; el.style.maxWidth = `${px}px`; } };
+  set(grid.tHead.rows[0].cells[c + 1]);
+  for (const tr of grid.tBodies[0].rows) set(tr.cells[c + 1]);
+}
+function applyRowPx(r, px) {
+  const tr = grid.tBodies[0].rows[r];
+  if (tr) for (const el of tr.cells) { el.style.height = `${px}px`; el.style.maxHeight = `${px}px`; }
+}
+// Cambios de tamaño con Deshacer en el aviso (como insertar/borrar)
+function sizeChange(text, fn) {
+  const snap = JSON.stringify({ colW: sheet.colW, rowH: sheet.rowH }); const id = sheet.id;
+  fn(); save(); render();
+  snack(text, 'Deshacer', () => {
+    if (sheet.id !== id) return;
+    Object.assign(sheet, JSON.parse(snap)); save(); if (view === 'tabla') render();
+  });
+}
+function setSizes(axis, a, b, px) {
+  for (let i = a; i <= b; i++) {
+    if (axis === 'c') sheet.colW[i] = pxToW(Math.max(MIN_W, Math.min(MAX_PX, px)));
+    else sheet.rowH[i] = pxToH(Math.max(MIN_H, Math.min(MAX_PX, px)));
+  }
+}
+const sizeLabel = (axis, a, b) => (axis === 'c' ? (a === b ? `columna ${colName(a)}` : `columnas ${colName(a)}:${colName(b)}`) : (a === b ? `fila ${a + 1}` : `filas ${a + 1}:${b + 1}`));
+async function askSize(axis, a, b) {
+  const cur = axis === 'c' ? curColPx(a) : curRowPx(a);
+  const v = await ask({ title: `${axis === 'c' ? 'Ancho' : 'Alto'} de ${sizeLabel(axis, a, b)}`, text: `En píxeles (normal: ${axis === 'c' ? DEF_W : DEF_H}).`, input: String(cur), ok: 'Aplicar' });
+  if (v == null) return;
+  const px = Math.round(parseFloat(String(v).replace(',', '.')));
+  if (!(px > 0)) { snack('Escribí un número de píxeles'); return; }
+  sizeChange(`${axis === 'c' ? 'Ancho' : 'Alto'} de ${sizeLabel(axis, a, b)}: ${Math.max(axis === 'c' ? MIN_W : MIN_H, Math.min(MAX_PX, px))} px`, () => setSizes(axis, a, b, px));
+}
+function resetSize(axis, a, b) {
+  sizeChange(`${axis === 'c' ? 'Ancho' : 'Alto'} normal en ${sizeLabel(axis, a, b)}`, () => {
+    for (let i = a; i <= b; i++) delete (axis === 'c' ? sheet.colW : sheet.rowH)[i];
+  });
+}
+// Ancho justo para el texto más largo de cada columna (con la fuente de cada celda); vacía = ancho normal
+let measureCtx = null;
+function fitWidth(c) {
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  let max = 0;
+  for (const k of Object.keys(sheet.cells)) {
+    const p = parseRef(k);
+    if (!p || p.c !== c) continue;
+    const td = cellEl(p.r, c);
+    if (!td) continue;
+    measureCtx.font = getComputedStyle(td).font;
+    const lines = String(sheet.cells[k]).split('\n');
+    for (const l of lines) max = Math.max(max, measureCtx.measureText(l).width);
+  }
+  return max ? Math.ceil(max) + 16 : null;
+}
+function autoFit(a, b) {
+  commit();
+  sizeChange(`Ancho ajustado al contenido (${sizeLabel('c', a, b)})`, () => {
+    for (let c = a; c <= b; c++) {
+      const px = fitWidth(c);
+      if (px == null) delete sheet.colW[c]; else setSizes('c', c, c, Math.max(px, 32));
+    }
+  });
+}
+let rz = null; // arrastre de un borde: { axis, i, start, px0, px, moved, el }
+let lastRzTap = null;
+grid.addEventListener('pointerdown', (e) => {
+  const h = e.target.closest('.rz');
+  if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  e.preventDefault(); e.stopPropagation();
+  commit();
+  const axis = h.dataset.rzc != null ? 'c' : 'r';
+  const i = +(axis === 'c' ? h.dataset.rzc : h.dataset.rzr);
+  const px0 = axis === 'c' ? h.parentElement.offsetWidth : h.parentElement.offsetHeight;
+  rz = { axis, i, start: axis === 'c' ? e.clientX : e.clientY, px0, px: px0, moved: false, el: h };
+  try { h.setPointerCapture(e.pointerId); } catch { /* nada */ }
+  h.classList.add('drag');
+}, true);
+grid.addEventListener('pointermove', (e) => {
+  if (!rz) return;
+  const d = (rz.axis === 'c' ? e.clientX : e.clientY) - rz.start;
+  if (!rz.moved && Math.abs(d) < 4) return;
+  if (!rz.moved) { rz.moved = true; document.body.classList.add('resizing'); document.body.classList.toggle('rz-fila', rz.axis === 'r'); }
+  e.preventDefault();
+  rz.px = Math.max(rz.axis === 'c' ? MIN_W : MIN_H, Math.min(MAX_PX, Math.round(rz.px0 + d)));
+  if (!rz.raf) {
+    rz.raf = requestAnimationFrame(() => {
+      if (!rz) return;
+      rz.raf = 0;
+      if (rz.axis === 'c') applyColPx(rz.i, rz.px); else applyRowPx(rz.i, rz.px);
+    });
+  }
+});
+function rzEnd() {
+  if (!rz) return;
+  const x = rz; rz = null;
+  if (x.raf) cancelAnimationFrame(x.raf);
+  x.el.classList.remove('drag');
+  document.body.classList.remove('resizing', 'rz-fila');
+  ignoreClick = Date.now() + 150;
+  if (x.moved) {
+    // Con varias columnas/filas elegidas enteras, el tamaño nuevo va a todas (como en Excel)
+    const R = rect();
+    const whole = x.axis === 'c' ? R.r1 === 0 && R.r2 === sheet.rows - 1 && x.i >= R.c1 && x.i <= R.c2
+      : R.c1 === 0 && R.c2 === sheet.cols - 1 && x.i >= R.r1 && x.i <= R.r2;
+    const a = whole ? (x.axis === 'c' ? R.c1 : R.r1) : x.i; const b = whole ? (x.axis === 'c' ? R.c2 : R.r2) : x.i;
+    sizeChange(`${x.axis === 'c' ? 'Ancho' : 'Alto'} de ${sizeLabel(x.axis, a, b)}: ${x.px} px`, () => setSizes(x.axis, a, b, x.px));
+    paintSelection();
+    lastRzTap = null;
+    return;
+  }
+  // Toque sin mover: el segundo toque seguido en el mismo borde ajusta
+  const now = Date.now();
+  if (lastRzTap && lastRzTap.axis === x.axis && lastRzTap.i === x.i && now - lastRzTap.t < 450) {
+    lastRzTap = null;
+    if (x.axis === 'c') autoFit(x.i, x.i);
+    else if (sheet.rowH[x.i] != null) resetSize('r', x.i, x.i);
+    else snack(`La fila ${x.i + 1} ya tiene el alto normal`);
+  } else lastRzTap = { axis: x.axis, i: x.i, t: now };
+}
+grid.addEventListener('pointerup', rzEnd);
+grid.addEventListener('pointercancel', rzEnd);
+
+// ---------- Elegir un rango arrastrando (1e-2) ----------
+// Celular: mantener apretada una celda un instante y arrastrar (sin esperar, el dedo desplaza la grilla como
+// siempre; quieto más tiempo, abre el menú). PC: apretar el botón del mouse y mover. También: Mayús + clic,
+// Mayús + flechas, tocar encabezados y escribir un rango (A1:C5) en el cuadro de nombre.
+const DRAG_HOLD = 250;
+let drag = null; // { r, c, x, y, sx, sy, armedAt, active, mouse, raf }
+const cellAt = (x, y) => {
+  const el = document.elementFromPoint(x, y);
+  const td = el && el.closest ? el.closest('#grid td') : null;
+  return td ? { r: +td.dataset.r, c: +td.dataset.c } : null;
+};
+function dragTo(x, y) {
+  drag.x = x; drag.y = y;
+  const hit = cellAt(x, y);
+  if (hit && (hit.r !== far.r || hit.c !== far.c)) select(hit.r, hit.c, { scroll: false, extend: true });
+}
+// Cerca de los bordes, la grilla se desplaza sola mientras se arrastra
+function dragScroll() {
+  if (!drag || !drag.active) return;
+  const b = wrap.getBoundingClientRect(); const E = 36;
+  const headH = grid.tHead.offsetHeight; const numW = grid.tBodies[0].rows[0].cells[0].offsetWidth;
+  let dx = 0; let dy = 0;
+  if (drag.y > b.bottom - E) dy = Math.min(E, drag.y - (b.bottom - E)) / 2;
+  else if (drag.y < b.top + headH + E / 2) dy = -Math.min(E, b.top + headH + E / 2 - drag.y) / 2;
+  if (drag.x > b.right - E) dx = Math.min(E, drag.x - (b.right - E)) / 2;
+  else if (drag.x < b.left + numW + E / 2) dx = -Math.min(E, b.left + numW + E / 2 - drag.x) / 2;
+  if (dx) wrap.scrollLeft += dx;
+  if (dy) wrap.scrollTop += dy;
+  if (dx || dy) dragTo(drag.x, drag.y);
+  drag.raf = requestAnimationFrame(dragScroll);
+}
+function dragActivate() {
+  drag.active = true;
+  if (editing) commit();
+  select(drag.r, drag.c, { scroll: false });
+  dragTo(drag.x, drag.y);
+  drag.raf = requestAnimationFrame(dragScroll);
+}
+function dragEnd() {
+  if (!drag) return;
+  if (drag.timer) clearTimeout(drag.timer);
+  if (drag.raf) cancelAnimationFrame(drag.raf);
+  if (drag.active) ignoreClick = Date.now() + 150;
+  drag = null;
+}
+wrap.addEventListener('touchstart', (e) => {
+  dragEnd();
+  if (e.touches.length !== 1 || e.target === cellEd) return;
+  const td = e.target.closest ? e.target.closest('#grid td') : null;
+  if (!td) return;
+  const t = e.touches[0];
+  drag = { r: +td.dataset.r, c: +td.dataset.c, x: t.clientX, y: t.clientY, sx: t.clientX, sy: t.clientY, armedAt: 0, active: false };
+  drag.timer = setTimeout(() => { if (drag) drag.armedAt = Date.now(); }, DRAG_HOLD);
+}, { passive: true });
+// No pasivo: con el dedo "armado", el movimiento elige celdas en vez de desplazar (preventDefault)
+wrap.addEventListener('touchmove', (e) => {
+  if (!drag || e.touches.length !== 1) { dragEnd(); return; }
+  const t = e.touches[0];
+  if (!drag.active) {
+    const moved = Math.abs(t.clientX - drag.sx) > 10 || Math.abs(t.clientY - drag.sy) > 10;
+    if (!moved) return;
+    // Se movió antes de tiempo (desplazamiento normal) o ya se abrió el menú de mantener apretado
+    if (!drag.armedAt || menuAt >= drag.armedAt) { dragEnd(); return; }
+    drag.x = t.clientX; drag.y = t.clientY;
+    dragActivate();
+  }
+  if (e.cancelable) e.preventDefault();
+  dragTo(t.clientX, t.clientY);
+}, { passive: false });
+wrap.addEventListener('touchend', dragEnd);
+wrap.addEventListener('touchcancel', dragEnd);
+grid.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse' || e.button !== 0 || e.shiftKey || rz) return;
+  const td = e.target.closest('td');
+  if (!td) return;
+  dragEnd();
+  drag = { r: +td.dataset.r, c: +td.dataset.c, x: e.clientX, y: e.clientY, active: false, mouse: true };
+});
+window.addEventListener('pointermove', (e) => {
+  if (!drag || !drag.mouse) return;
+  if (!(e.buttons & 1)) { dragEnd(); return; }
+  if (!drag.active) {
+    const hit = cellAt(e.clientX, e.clientY);
+    if (!hit || (hit.r === drag.r && hit.c === drag.c)) return;
+    drag.x = e.clientX; drag.y = e.clientY;
+    dragActivate();
+    return;
+  }
+  dragTo(e.clientX, e.clientY);
+});
+window.addEventListener('pointerup', () => { if (drag && drag.mouse) dragEnd(); });
+
+// ---------- Copiar, cortar y pegar (1e-2) ----------
+// Al portapapeles del sistema va texto con tabuladores (como Excel y Google Sheets): se puede pegar allá y
+// traer de allá. Dentro de la app se guarda además el formato (clip), que se usa si el texto no cambió.
+// Cortar: al pegar (una vez), la celda de origen queda vacía. Un solo valor sobre un rango lo llena entero.
+let clip = null; // { text, vals: [[texto]], sty: [[estilo|null]], cut: { id, r1, c1, r2, c2 } | null }
+const needsQuote = /[\t\n\r"]/;
+function toTsv(vals) {
+  return vals.map((row) => row.map((v) => (needsQuote.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join('\t')).join('\r\n');
+}
+// Texto con tabuladores y saltos de línea → filas de valores (comillas como las pone Excel)
+function parseTsv(text) {
+  text = String(text).replace(/\r\n?/g, '\n');
+  if (text.endsWith('\n')) text = text.slice(0, -1);
+  const rows = [[]]; let f = ''; let q = false; let start = true;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch;
+      continue;
+    }
+    if (ch === '"' && start) { q = true; start = false; continue; }
+    start = false;
+    if (ch === '\t') { rows[rows.length - 1].push(f); f = ''; start = true; } else if (ch === '\n') { rows[rows.length - 1].push(f); rows.push([]); f = ''; start = true; } else f += ch;
+  }
+  rows[rows.length - 1].push(f);
+  return rows;
+}
+const sameText = (a, b) => String(a).replace(/\r\n?/g, '\n').replace(/\n$/, '') === String(b).replace(/\r\n?/g, '\n').replace(/\n$/, '');
+// Achica el rango a lo que tiene datos (una columna entera de 10000 filas no hace falta copiarla toda)
+function usedRect(R) {
+  const { mr, mc } = lastUsed();
+  return { r1: R.r1, c1: R.c1, r2: Math.max(R.r1, Math.min(R.r2, mr)), c2: Math.max(R.c1, Math.min(R.c2, mc)) };
+}
+function grab(cut) {
+  commit();
+  const R = usedRect(rect());
+  const vals = []; const sty = [];
+  for (let r = R.r1; r <= R.r2; r++) {
+    const vr = []; const sr = [];
+    for (let c = R.c1; c <= R.c2; c++) { vr.push(getCell(r, c)); const st = sheet.styles[ref(r, c)]; sr.push(st ? JSON.parse(JSON.stringify(st)) : null); }
+    vals.push(vr); sty.push(sr);
+  }
+  clip = { text: toTsv(vals), vals, sty, cut: cut ? { id: sheet.id, ...R } : null };
+  return R;
+}
+async function copySel(cut, ev) {
+  const R = grab(cut);
+  const n = (R.r2 - R.r1 + 1) * (R.c2 - R.c1 + 1);
+  const what = `${n === 1 ? ref(R.r1, R.c1) : `${rectName(R)} (${n} celdas)`}`;
+  let ok = true;
+  if (ev) ev.clipboardData.setData('text/plain', clip.text); else ok = await clipboardWrite(clip.text);
+  snack(`${cut ? 'Cortado' : 'Copiado'} ${what}${ok ? '' : ' (solo dentro de la app)'}. Elegí dónde y tocá Pegar.`);
+}
+async function pasteSel(textFromEvent) {
+  commit();
+  let text = textFromEvent;
+  if (text == null) text = await clipboardRead();
+  let src;
+  if (clip && (text == null || text === '' || sameText(text, clip.text))) src = clip; // de la app: con formato
+  else if (text) src = { vals: parseTsv(text), sty: null, cut: null };
+  else { snack(text === '' ? 'El portapapeles está vacío' : 'No se pudo leer el portapapeles (en la PC probá con Ctrl+V)'); return; }
+  const h = src.vals.length; const w = Math.max(...src.vals.map((x) => x.length));
+  const R = rect();
+  const selH = R.r2 - R.r1 + 1; const selW = R.c2 - R.c1 + 1;
+  // Si el rango elegido es múltiplo de lo copiado (por ejemplo, un valor sobre varias celdas), se repite
+  const tile = isRange() && selH % h === 0 && selW % w === 0;
+  const H = tile ? selH : h; const W = tile ? selW : w;
+  if (R.r1 + H > 10000 || R.c1 + W > 702) { snack('No entra: se pasa del tamaño permitido'); return; }
+  const cutFrom = src.cut;
+  const dest = { r1: R.r1, c1: R.c1, r2: R.r1 + H - 1, c2: R.c1 + W - 1 };
+  withUndo(`Pegado en ${rectName(dest)}${cutFrom && cutFrom.id !== sheet.id ? ' (de otra planilla: el original queda)' : ''}`, () => {
+    if (cutFrom && cutFrom.id === sheet.id) {
+      for (let r = cutFrom.r1; r <= cutFrom.r2; r++) {
+        for (let c = cutFrom.c1; c <= cutFrom.c2; c++) { delete sheet.cells[ref(r, c)]; delete sheet.styles[ref(r, c)]; }
+      }
+    }
+    for (let i = 0; i < H; i++) {
+      for (let j = 0; j < W; j++) {
+        const k = ref(R.r1 + i, R.c1 + j);
+        const v = (src.vals[i % h] || [])[j % w] ?? '';
+        if (v === '') delete sheet.cells[k]; else sheet.cells[k] = v;
+        if (src.sty) { const st = (src.sty[i % h] || [])[j % w]; if (st) sheet.styles[k] = JSON.parse(JSON.stringify(st)); else delete sheet.styles[k]; }
+      }
+    }
+    sheet.rows = Math.max(sheet.rows, dest.r2 + 1);
+    sheet.cols = Math.max(sheet.cols, dest.c2 + 1);
+  });
+  if (cutFrom) clip = null; // lo cortado se pega una vez
+  selectRect(dest.r1, dest.c1, dest.r2, dest.c2);
+  scrollToSel();
+}
+// Teclado (Ctrl+C / Ctrl+X / Ctrl+V) con la grilla elegida: eventos del navegador, sin pedir permiso
+const gridHasFocus = () => view === 'tabla' && !editing && document.activeElement === wrap && $('menu').hidden && $('dialog').hidden;
+document.addEventListener('copy', (e) => { if (gridHasFocus() && e.clipboardData) { e.preventDefault(); copySel(false, e); } });
+document.addEventListener('cut', (e) => { if (gridHasFocus() && e.clipboardData) { e.preventDefault(); copySel(true, e); } });
+document.addEventListener('paste', (e) => {
+  if (!gridHasFocus() || !e.clipboardData) return;
+  e.preventDefault();
+  pasteSel(e.clipboardData.getData('text/plain'));
+});
 
 // ---------- Vista Ficha ----------
 function fieldCount() {
@@ -520,9 +967,13 @@ function applyView() {
     b.setAttribute('aria-selected', on ? 'true' : 'false');
   });
   if (f) { ficha.scrollTop = 0; renderFicha(sel.c < fieldCount() ? sel.c : null, true); }
-  else if (t) { render(); select(sel.r, sel.c); }
+  else if (t) {
+    render(); select(sel.r, sel.c);
+    tipOnce('planillas-tip-grilla', 'Tocá dos veces una celda para escribir en ella. Mantené apretado y arrastrá para elegir varias.');
+  }
   else {
     renderReport();
+    if (reportData().rows.length) tipOnce('planillas-tip-reporte', 'Mantené apretada una celda para cambiar su valor.');
     if (repPos) { repScroll.scrollTop = repPos.top; repScroll.scrollLeft = repPos.left; } else { repScroll.scrollTop = 0; repScroll.scrollLeft = 0; }
   }
 }
@@ -782,7 +1233,7 @@ function renderReport() {
     let h = `<tr data-r="${r}"${franjas && k % 2 ? ' class="f"' : ''}>`;
     cols.forEach((c, i) => {
       const cls = `${i === 0 && fija ? 'fija' : ''}${nums.has(c) ? ' num' : ''}`.trim();
-      h += `<td${cls ? ` class="${cls}"` : ''}><div>${cellHtml(r, c)}</div></td>`;
+      h += `<td data-c="${c}"${cls ? ` class="${cls}"` : ''}><div>${cellHtml(r, c)}</div></td>`;
     });
     return `${h}</tr>`;
   };
@@ -880,6 +1331,57 @@ $('rep-table').addEventListener('click', (e) => {
   const n = vget('orden');
   snack(n ? `Ordenado por ${colTitle(c)} ${n.dir > 0 ? '(A → Z, 0 → 9)' : '(Z → A, 9 → 0)'}` : 'Sin orden (como en la planilla)');
 });
+// Mantener apretada una celda (o clic derecho): cambiar ese valor sin ir a la Ficha (1e-1).
+// En las columnas con pocos valores distintos (etiquetas, categorías) el campo sugiere los que ya hay.
+const IR_FICHA = { ficha: true };
+$('rep-table').addEventListener('contextmenu', (e) => {
+  const td = e.target.closest('tbody tr:not(.grupo) td[data-c]');
+  if (!td) return;
+  e.preventDefault();
+  editFromReport(+td.parentElement.dataset.r, +td.dataset.c);
+});
+async function editFromReport(r, c) {
+  const { cols, rows } = reportData();
+  const { shown } = orderedCols(cols);
+  const old = getCell(r, c);
+  const vals = distinct(c, rows, 40);
+  const sugerir = vals.length <= 40 && vals.length < rows.length;
+  const first = shown[0] !== c ? getCell(r, shown[0]) : '';
+  if (dialogDone) closeDialog();
+  const v = await new Promise((resolve) => {
+    openDialog(colTitle(c), `<p class="dialog-sub">${first ? `${esc(first)} · ` : ''}fila ${r + 1} (${ref(r, c)})</p>`
+      + `<input id="dialog-input" class="dialog-input" type="text" value="${esc(old)}" autocomplete="off" enterkeyhint="done"${sugerir ? ' list="dialog-opts"' : ''}>`
+      + (sugerir ? `<datalist id="dialog-opts">${vals.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>` : ''),
+    [{ label: 'Cancelar', value: null }, { label: 'Ver ficha', value: IR_FICHA }, { label: 'Guardar', value: 'ok' }]);
+    dialogDone = resolve;
+    const inp = $('dialog-input');
+    inp.focus(); inp.select();
+    inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); closeDialog('ok'); } });
+  });
+  if (v === IR_FICHA) { sel = { r, c }; far = { r, c }; setView('ficha'); return; }
+  if (v == null || v === old) return;
+  const id = sheet.id;
+  const put = (x) => {
+    if (sheet.id !== id) return;
+    if (r >= sheet.rows) sheet.rows = r + 1;
+    setCell(r, c, x);
+    if (view === 'reporte') { const top = repScroll.scrollTop; const left = repScroll.scrollLeft; renderReport(); repScroll.scrollTop = top; repScroll.scrollLeft = left; }
+  };
+  put(v);
+  snack(`${colTitle(c)}: guardado`, 'Deshacer', () => put(old));
+}
+// Consejos que se muestran una sola vez (por equipo)
+function tipOnce(key, text) {
+  try {
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+  } catch { return; }
+  setTimeout(() => {
+    // Si hay otro aviso a la vista (por ejemplo, con Deshacer), el consejo queda para la próxima vez
+    if ($('snackbar').classList.contains('show')) { try { localStorage.removeItem(key); } catch { /* nada */ } return; }
+    snack(text);
+  }, 600);
+}
 function foldAll(close) {
   const st = repState();
   st.plegados = new Set(close ? (renderReport.groups || []).map((x) => x.v) : []);
@@ -1086,7 +1588,7 @@ async function openFile(f) {
   sheet.rowH = sheet.rowH || {};
   sheet.rows = Math.max(sheet.rows || 0, MIN_ROWS);
   sheet.cols = Math.max(sheet.cols || 0, MIN_COLS);
-  sel = { r: 0, c: 0 }; rec = 1; undoSnap = null; repPos = null;
+  sel = { r: 0, c: 0 }; far = { r: 0, c: 0 }; rec = 1; undoSnap = null; repPos = null;
   closeConfig();
   if (view === 'tabla') commit();
   if (document.activeElement && focusedField() != null) document.activeElement.blur();
@@ -1338,7 +1840,7 @@ function closeDialog(value = null) {
   const done = dialogDone; dialogDone = null;
   if (done) {
     const inp = $('dialog-input');
-    done(value === 'ok' ? (inp ? inp.value : true) : null);
+    done(value === 'ok' ? (inp ? inp.value : true) : value);
   }
 }
 // Pregunta con botones propios (sin confirm/prompt del navegador). Devuelve el texto, true o null.
@@ -1379,7 +1881,7 @@ function showVersion() {
   const r = release;
   const dev = deviceInfo();
   openDialog(`Planillas v${APP_VERSION}`, `
-    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1d-2)</p>
+    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 1e)</p>
     <p>Fecha de la versión: ${r && r.tag === `v${APP_VERSION}` ? esc(formatDate(r.fileDate)) : 'sin datos'}</p>
     ${r && isNewer(r.tag) ? `<p><b>Hay una versión nueva: ${esc(r.tag)}</b></p>` : ''}
     ${dev ? `<p>Equipo: ${esc(dev)}</p>` : ''}
@@ -1408,7 +1910,7 @@ initNative({
     else if (!$('dialog').hidden) closeDialog();
     else if (!$('files').hidden) hideFiles();
     else if (!cfg.hidden) closeConfig();
-    else if (editing) { cancel(); formula.blur(); }
+    else if (editing) { cancel(); formula.blur(); cellEd.blur(); } else if (view === 'tabla' && isRange()) select(sel.r, sel.c, { scroll: false });
     else if (focusedField() != null) document.activeElement.blur();
     else minimizeApp();
   },

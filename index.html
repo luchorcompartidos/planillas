@@ -35,6 +35,7 @@
     </div>
     <main class="grid-wrap" id="grid-wrap" tabindex="0" aria-label="Planilla">
       <table class="grid" id="grid"></table>
+      <input id="cell-ed" class="cell-ed" type="text" aria-label="Escribir en la celda" autocomplete="off" spellcheck="false" enterkeyhint="done" hidden>
     </main>
     <main class="reporte" id="reporte" aria-label="Vista Reporte" hidden>
       <div class="rep-herr" id="rep-herr" hidden>
@@ -58,9 +59,10 @@
       <button class="tool add-field" id="btn-add-field" type="button">+ Campo</button>
     </main>
     <nav class="bottombar" id="grid-bar" aria-label="Acciones">
-      <button class="tool" id="btn-add-row" type="button">+ Fila</button>
-      <button class="tool" id="btn-add-col" type="button">+ Columna</button>
-      <button class="tool" id="btn-clear" type="button">Borrar celda</button>
+      <button class="tool" id="btn-copy" type="button">Copiar</button>
+      <button class="tool" id="btn-cut" type="button">Cortar</button>
+      <button class="tool" id="btn-paste" type="button">Pegar</button>
+      <button class="tool" id="btn-clear" type="button">Borrar</button>
       <button class="tool" id="btn-more" type="button">Más…</button>
     </nav>
     <nav class="bottombar ficha-bar" id="ficha-bar" aria-label="Registros" hidden>

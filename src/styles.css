@@ -102,6 +102,29 @@ button { font: inherit; cursor: pointer; }
 .grid th.on { background: var(--verde-medio); color: var(--verde); font-weight: 700; }
 .grid td.sel { box-shadow: inset 0 0 0 2px var(--verde); background: #fff; }
 .grid td.sel.editing { box-shadow: inset 0 0 0 2px var(--verde), inset 0 0 0 4px var(--verde-claro); }
+/* Rango seleccionado (1e-2): fondo verde suave; la celda activa mantiene el borde */
+.grid td.rng { background: #E8F4EC; }
+.grid td.rng.sel { background: #fff; }
+.grid th.on-r { background: var(--verde-claro); color: var(--verde); }
+/* Escribir en la celda misma (1e-1): cuadro sobre la celda, sincronizado con la barra de fórmula */
+.cell-ed {
+  position: absolute; z-index: 1; margin: 0; padding: 0 5px; font: 15px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border: 2px solid var(--verde); border-radius: 0; background: #fff; color: var(--texto); outline: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+/* Ancho de columnas y alto de filas arrastrando el borde del encabezado (1e-1); doble toque = ajustar */
+.grid thead th, .grid tbody th { overflow: visible; }
+.grid thead th { text-overflow: clip; }
+.rz { position: absolute; touch-action: none; z-index: 1; }
+.rz-c { top: 0; right: -1px; bottom: 0; width: 16px; cursor: col-resize; }
+.rz-r { left: 0; right: 0; bottom: -1px; height: 12px; cursor: row-resize; }
+.rz::after { content: ""; position: absolute; background: transparent; border-radius: 2px; }
+.rz-c::after { top: 5px; bottom: 5px; right: 4px; width: 4px; }
+.rz-r::after { left: 10px; right: 10px; bottom: 3px; height: 4px; }
+.grid th.on .rz::after, .rz.drag::after { background: var(--verde); }
+@media (hover: hover) { .rz:hover::after { background: var(--verde); } }
+body.resizing, body.resizing * { cursor: col-resize !important; }
+body.resizing.rz-fila, body.resizing.rz-fila * { cursor: row-resize !important; }
 
 /* Barra inferior */
 .bottombar {
@@ -109,6 +132,8 @@ button { font: inherit; cursor: pointer; }
   border-top: 1px solid var(--encab-borde); background: var(--encab); flex: none; overflow-x: auto;
 }
 .kb-open #grid-bar { display: none; }
+/* Barra de la Grilla (1e): Copiar, Cortar, Pegar, Borrar y Más… entran en 360 px */
+#grid-bar .tool { flex: 1 1 auto; min-width: 0; padding: 8px 4px; text-align: center; }
 .tool:disabled { opacity: .4; }
 .ficha-bar { align-items: center; }
 .f-pos { flex: 1; min-width: 96px; text-align: center; font-size: 14px; color: var(--texto-2); white-space: nowrap; }
@@ -220,6 +245,7 @@ button { font: inherit; cursor: pointer; }
 .rep td.fija { position: -webkit-sticky; position: sticky; left: 0; z-index: 1; font-weight: 600; box-shadow: 1px 0 0 var(--r-linea); }
 .rep .num { text-align: right; font-variant-numeric: tabular-nums; }
 .rep tbody tr { cursor: pointer; }
+.rep tbody td { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } /* mantener apretado = editar (1e-1) */
 .rep tbody tr:active td { background: var(--r-toque); }
 .rep-empty { margin: 0; padding: 20px 16px; color: var(--r-fg2); line-height: 1.45; font-size: 14px; }
 .rep-bar {
@@ -344,3 +370,4 @@ button { font: inherit; cursor: pointer; }
 .config .tag.t6 { background: #FCE3CF; color: #8A4710; } .config .tag.t7 { background: #FAD9D9; color: #962525; }
 .config .tag.t8 { background: #E8F3CC; color: #4C6410; } .config .tag.t9 { background: #DDE2FA; color: #2E3C99; }
 .config .tag.t10 { background: #EFE3D8; color: #6B4A2E; } .config .tag.t11 { background: #E4E8EA; color: #3E4A50; }
+.dialog-sub { color: var(--texto-2); font-size: 13px !important; margin-top: -2px !important; }

@@ -8,3 +8,4 @@ export const Style = { Dark: 'DARK', Light: 'LIGHT' };
 export const Filesystem = { writeFile: nada };
 export const Directory = { Cache: 'CACHE' };
 export const Share = { share: nada };
+export const registerPlugin = () => ({ escribir: () => Promise.reject(new Error('web')), leer: () => Promise.reject(new Error('web')) });

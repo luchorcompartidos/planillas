@@ -2,6 +2,7 @@
 - Ícono propio
 - Atrapador de cierres (PlanillasApp + CierreActivity), copiado de ANote...
 - Android 5.0: arreglo de @capacitor/status-bar (getRootWindowInsets es de Android 6)
+- MainActivity propia que registra el plugin Portapapeles (copiar y pegar celdas, v0.0.8), como en ANote...
 Referencia: android-extra/patch-android.py del repo luchorcompartidos/notas y
 plantilla/APK-DISPOSITIVOS-VIEJOS.md (sección 8) del repo luchorcompartidos/home.
 """
@@ -16,7 +17,7 @@ for path in glob.glob(f'{APP}/res/mipmap-*/ic_launcher_foreground.png'):
     os.remove(path)
 shutil.copytree(f'{BASE}/res', f'{APP}/res', dirs_exist_ok=True)
 
-# 2. Código Java
+# 2. Código Java (incluye MainActivity.java: reemplaza la que genera Capacitor)
 os.makedirs(PKG_DIR, exist_ok=True)
 for name in os.listdir(f'{BASE}/java'):
     shutil.copy(f'{BASE}/java/{name}', f'{PKG_DIR}/{name}')
@@ -53,4 +54,6 @@ if 'Planillas: Android 5' not in sb:
 assert 'Planillas: Android 5' in sb
 
 assert '.PlanillasApp' in m and 'CierreActivity' in m, 'No se pudo agregar el atrapador de cierres al manifest'
-print('Proyecto Android ajustado: ícono, atrapador de cierres y status-bar para Android 5')
+ma = open(f'{PKG_DIR}/MainActivity.java', encoding='utf-8').read()
+assert 'registerPlugin(PortapapelesPlugin.class)' in ma, 'MainActivity sin el plugin Portapapeles'
+print('Proyecto Android ajustado: ícono, atrapador de cierres, portapapeles y status-bar para Android 5')
