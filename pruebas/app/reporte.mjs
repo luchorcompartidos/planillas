@@ -25,9 +25,11 @@ const check = (name, ok, extra = '') => console.log(`${ok ? 'OK ' : 'MAL'} ${nam
 const vista = () => page.$eval('.vb.on', (b) => b.dataset.v);
 
 await page.goto('http://localhost:8765/', { waitUntil: 'networkidle0' });
-await page.waitForSelector('#grid td');
-check('planilla nueva abre en Grilla', await vista() === 'tabla');
-await shot('0-grilla');
+await page.waitForSelector('.vb.on');
+check('planilla nueva abre en Reporte (v0.0.7)', await vista() === 'reporte');
+check('pestañas: Reporte, Ficha, Grilla', (await page.$$eval('#viewbar .vb', (b) => b.map((x) => x.dataset.v).join())) === 'reporte,ficha,tabla');
+await page.tap('.vb[data-v="ficha"]'); await wait(200); // la planilla nueva queda en Ficha (para ver que cada una recuerda la suya)
+await shot('0-nueva');
 await page.tap('#btn-file-menu');
 await page.waitForSelector('#menu:not([hidden])');
 const [chooser] = await Promise.all([page.waitForFileChooser(), page.evaluate(() => [...document.querySelectorAll('#menu-items button')].find((x) => x.textContent.startsWith('Importar')).click())]);
@@ -90,7 +92,7 @@ check('al recargar sigue en Reporte con tema claro', await vista() === 'reporte'
 await page.tap('#file-title'); await page.waitForSelector('#files:not([hidden])'); await wait(200);
 await page.evaluate(() => [...document.querySelectorAll('.file-item')].find((li) => !li.classList.contains('current')).querySelector('.file-open').click());
 await wait(300);
-check('cada planilla recuerda su vista', await vista() === 'tabla');
+check('cada planilla recuerda su vista', await vista() === 'ficha');
 await page.tap('.vb[data-v="reporte"]'); await wait(200);
 check('reporte vacío con aviso', !(await page.$eval('#rep-empty', (e) => e.hidden)), await page.$eval('#rep-empty', (e) => e.textContent.slice(0, 40)));
 await shot('5-vacio');

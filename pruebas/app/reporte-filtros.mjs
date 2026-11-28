@@ -41,7 +41,7 @@ const titulo = (t) => page.evaluate((t) => [...document.querySelectorAll('#rep-t
 const buscar = async (t) => { await page.$eval('#rep-q', (i) => { i.value = ''; }); if (t) await page.type('#rep-q', t); else await page.$eval('#rep-q', (i) => i.dispatchEvent(new Event('input'))); await wait(350); };
 
 await page.goto('http://localhost:8765/', { waitUntil: 'networkidle0' });
-await page.waitForSelector('#grid td');
+await page.waitForSelector('.vb.on');
 await page.tap('#btn-file-menu');
 await page.waitForSelector('#menu:not([hidden])');
 const [chooser] = await Promise.all([page.waitForFileChooser(), page.evaluate(() => [...document.querySelectorAll('#menu-items button')].find((x) => x.textContent.startsWith('Importar')).click())]);
@@ -116,7 +116,7 @@ check('etiquetas con paleta clara', claro !== oscuro, `${oscuro} → ${claro}`);
 await shot('5-claro');
 await page.tap('#rep-tema'); await page.tap('#rep-tema'); await wait(150); // vuelve a oscuro
 
-// Otra planilla: búsqueda, filtro y orden empiezan de cero; sin registros no hay buscador
+// Otra planilla: búsqueda y filtro empiezan de cero (el orden queda guardado en la planilla, v0.0.7); sin registros no hay buscador
 await page.tap('#file-title'); await page.waitForSelector('#files:not([hidden])'); await wait(200);
 await page.evaluate(() => [...document.querySelectorAll('.file-item')].find((li) => !li.classList.contains('current')).querySelector('.file-open').click());
 await wait(300); await page.tap('.vb[data-v="reporte"]'); await wait(200);
@@ -124,7 +124,8 @@ check('planilla vacía: sin buscador', await page.$eval('#rep-herr', (x) => x.hi
 await page.tap('#file-title'); await page.waitForSelector('#files:not([hidden])'); await wait(200);
 await page.evaluate(() => [...document.querySelectorAll('.file-item')].find((li) => !li.classList.contains('current')).querySelector('.file-open').click());
 await wait(300); e = await estado();
-check('al cambiar de planilla, estado nuevo', e.rows[0] === 'Producto 1' && e.chips[0] === 'Todos 30*', `${e.rows[0]} ${e.chips[0]}`);
+// Desde la v0.0.7 el orden se guarda en la planilla (vista.orden): búsqueda y filtro empiezan de cero, el orden sigue
+check('al cambiar de planilla: filtro de cero y orden guardado', e.rows[0] === 'Producto 30' && e.chips[0] === 'Todos 30*', `${e.rows[0]} ${e.chips[0]}`);
 console.log('errores de la página:', errs.length ? errs : 'ninguno');
 console.log(mal ? `${mal} MAL` : 'todo OK');
 await browser.close();

@@ -23,7 +23,7 @@ async function menuItem(text) {
   if (!ok) throw new Error(`No está en el menú: ${text}`);
 }
 await page.goto('http://localhost:8765/', { waitUntil: 'networkidle0' });
-await page.waitForSelector('#grid td');
+await page.waitForSelector('.vb.on');
 
 // 1. Importar tres archivos desde el ⋮ del archivo abierto
 await page.tap('#btn-file-menu');
@@ -75,7 +75,7 @@ await browser.close();
   const p2 = await b2.newPage();
   await p2.emulate({ viewport: { width: 360, height: 640, deviceScaleFactor: 1, isMobile: true, hasTouch: true }, userAgent: 'Mozilla/5.0 (Linux; Android 6.0.1) Chrome/106.0 Mobile Safari/537.36' });
   await p2.setRequestInterception(true); p2.on('request', (r) => (r.url().includes('api.github.com') ? r.abort() : r.continue()));
-  await p2.goto('http://localhost:8765/', { waitUntil: 'networkidle0' }); await p2.waitForSelector('#grid td');
+  await p2.goto('http://localhost:8765/', { waitUntil: 'networkidle0' }); await p2.waitForSelector('.vb.on');
   await p2.tap('#btn-file-menu'); await new Promise((r) => setTimeout(r, 300));
   await p2.screenshot({ path: `${SHOTS}/5-menu-360.png` });
   await b2.close();

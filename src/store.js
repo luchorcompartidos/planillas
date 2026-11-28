@@ -91,8 +91,10 @@ export async function recoverPending() {
   try { p = JSON.parse(localStorage.getItem(LS_PENDING)); } catch { p = null; }
   if (!p || !p.id || !p.cells) { clearPending(); return; }
   const cur = await getFile(p.id);
-  // Más nueva, o igual de nueva pero con otra vista (cambiar de vista no cambia la fecha; v0.0.5)
+  // Más nueva, o igual de nueva pero con otra vista o con otros ajustes del Reporte
+  // (cambiar de vista o "Configurar vista" no cambian la fecha; v0.0.5 y v0.0.7)
   const pu = p.updated || 0; const cu = cur ? cur.updated || 0 : 0;
-  if (!cur || pu > cu || (pu === cu && p.view && p.view !== cur.view)) await putFile(p);
+  const otraVista = cur && ((p.view && p.view !== cur.view) || JSON.stringify(p.vista || null) !== JSON.stringify(cur.vista || null));
+  if (!cur || pu > cu || (pu === cu && otraVista)) await putFile(p);
   clearPending();
 }

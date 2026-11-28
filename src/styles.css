@@ -199,7 +199,7 @@ button { font: inherit; cursor: pointer; }
 /* Vista Reporte: oscura por defecto (.claro = tema claro). Colores fijos por tema (sin color-mix). */
 .reporte {
   --r-bg: #121614; --r-franja: #1B221E; --r-fg: #E6ECE8; --r-fg2: #9DABA3; --r-linea: #27312B;
-  --r-barra: #0D110F; --r-acento: #6FD39B; --r-toque: #24402F;
+  --r-barra: #0D110F; --r-acento: #6FD39B; --r-toque: #24402F; --r-head: #1E7B4F;
   flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--r-bg); color: var(--r-fg);
 }
 .reporte.claro {
@@ -212,11 +212,11 @@ button { font: inherit; cursor: pointer; }
 .rep th > div, .rep td > div { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .rep thead th {
   position: -webkit-sticky; position: sticky; top: 0; z-index: 2;
-  background: var(--verde); color: #fff; font-weight: 700; font-size: 13px; border-bottom-color: var(--verde);
+  background: var(--r-head); color: #fff; font-weight: 700; font-size: 13px; border-bottom-color: var(--r-head);
 }
 .rep thead th.fija { left: 0; z-index: 3; }
 .rep td { background: var(--r-bg); }
-.rep tbody tr:nth-child(even) td { background: var(--r-franja); }
+.rep tbody tr.f td { background: var(--r-franja); }
 .rep td.fija { position: -webkit-sticky; position: sticky; left: 0; z-index: 1; font-weight: 600; box-shadow: 1px 0 0 var(--r-linea); }
 .rep .num { text-align: right; font-variant-numeric: tabular-nums; }
 .rep tbody tr { cursor: pointer; }
@@ -272,3 +272,75 @@ button { font: inherit; cursor: pointer; }
 .reporte.claro .tag.t6 { background: #FCE3CF; color: #8A4710; } .reporte.claro .tag.t7 { background: #FAD9D9; color: #962525; }
 .reporte.claro .tag.t8 { background: #E8F3CC; color: #4C6410; } .reporte.claro .tag.t9 { background: #DDE2FA; color: #2E3C99; }
 .reporte.claro .tag.t10 { background: #EFE3D8; color: #6B4A2E; } .reporte.claro .tag.t11 { background: #E4E8EA; color: #3E4A50; }
+
+/* Reporte 1d-2: Configurar vista (densidad, encabezado, acento), grupos con subtotales, resumen arriba.
+   Sin color-mix ni :has (WebView de Android 5/6): cada acento tiene sus colores fijos por tema. */
+.reporte.ac-azul { --r-head: #1A5FB4; --r-acento: #8AB8F5; } .reporte.claro.ac-azul { --r-acento: #1A5FB4; }
+.reporte.ac-violeta { --r-head: #6B3FA0; --r-acento: #C3A6F2; } .reporte.claro.ac-violeta { --r-acento: #6B3FA0; }
+.reporte.ac-naranja { --r-head: #B4580F; --r-acento: #F5B07A; } .reporte.claro.ac-naranja { --r-acento: #A04D0C; }
+.reporte.ac-rojo { --r-head: #B3261E; --r-acento: #F59C9C; } .reporte.claro.ac-rojo { --r-acento: #B3261E; }
+.reporte.ac-gris { --r-head: #455A64; --r-acento: #B0BEC5; } .reporte.claro.ac-gris { --r-acento: #455A64; }
+.reporte.sin-encab .rep thead th { background: var(--r-barra); color: var(--r-fg); border-bottom: 2px solid var(--r-head); }
+.reporte.compacta .rep { font-size: 13px; }
+.reporte.compacta .rep th, .reporte.compacta .rep td { padding: 5px 8px; }
+.reporte.compacta .tag { font-size: 12px; padding: 1px 7px; }
+.rep tr.grupo td { background: var(--r-barra); padding: 0; border-bottom: 1px solid var(--r-linea); border-top: 1px solid var(--r-linea); }
+.rep tr.grupo td > div.g-in {
+  position: -webkit-sticky; position: sticky; left: 0; display: flex; align-items: center; gap: 8px;
+  max-width: 100vw; overflow: hidden; padding: 8px 12px; box-sizing: border-box;
+}
+.reporte.compacta .rep tr.grupo td > div.g-in { padding: 5px 8px; }
+.rep tr.grupo.plegable { cursor: pointer; }
+.rep tr.grupo:not(.plegable) { cursor: default; }
+.g-tog { flex: none; width: 12px; color: var(--r-acento); font-size: 13px; }
+.g-in b { font-weight: 700; }
+.g-in small { flex: none; color: var(--r-fg2); font-size: 12px; }
+.g-in .tag, .g-in b, .g-in i { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-sub { margin-left: auto; flex: none; padding-left: 8px; color: var(--r-fg2); font-size: 13px; }
+.g-sub b { color: var(--r-acento); }
+.tag.tn { background: transparent; color: var(--r-fg); box-shadow: inset 0 0 0 1px var(--r-linea); font-weight: 500; }
+.rep-resumen { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; scrollbar-width: none; }
+.rep-resumen::-webkit-scrollbar { display: none; }
+.rc { flex: 1 0 auto; min-width: 92px; max-width: 220px; background: var(--r-bg); border: 1px solid var(--r-linea); border-radius: 10px; padding: 6px 10px; }
+.rc small { display: block; color: var(--r-fg2); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc b { display: block; color: var(--r-acento); font-size: 17px; white-space: nowrap; }
+.rep-ir { border: 1px solid var(--r-acento); color: var(--r-acento); background: transparent; border-radius: 14px; padding: 2px 10px; font-size: 14px; font-weight: 600; }
+
+/* Panel "Configurar vista": hoja inferior; el reporte queda visible arriba y cambia en el momento */
+.config {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; height: 64%; max-width: 560px; margin: 0 auto;
+  display: flex; flex-direction: column; background: #fff; color: var(--texto);
+  border-radius: 14px 14px 0 0; box-shadow: 0 -4px 24px rgba(0,0,0,.35);
+}
+.config-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--linea); flex: none; }
+.config-head b { font-size: 16px; }
+.cfg-listo { background: var(--verde); color: #fff; border-radius: 16px; padding: 6px 14px; }
+.cfg-listo:active { background: #155C38; }
+.config-body { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; padding: 0 16px max(16px, env(safe-area-inset-bottom)); }
+.config-body h3 { margin: 16px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--verde); }
+.cfg-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; border-bottom: 1px solid #EEE; font-size: 15px; }
+.cfg-row > span:first-child { min-width: 0; }
+.cfg-row small { color: var(--texto-2); font-size: 12px; }
+.cfg-row select { flex: none; max-width: 58%; font-size: 15px; padding: 5px 6px; border: 1px solid var(--encab-borde); border-radius: 6px; background: #fff; color: var(--texto); }
+.cfg-chk input { flex: none; width: 22px; height: 22px; accent-color: var(--verde); }
+.cfg-col label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg-col input { flex: none; width: 20px; height: 20px; accent-color: var(--verde); }
+.cfg-col > span { flex: none; display: flex; gap: 4px; }
+.cfg-mv { border: 1px solid var(--encab-borde); background: #fff; border-radius: 6px; width: 36px; height: 32px; font-size: 12px; color: var(--texto); }
+.cfg-mv:disabled { opacity: .35; }
+.cfg-mv:active { background: var(--verde-claro); }
+.cfg-sub { margin: 12px 0 2px; font-size: 14px; }
+.cfg-nota { margin: 10px 0; font-size: 13px; color: var(--texto-2); line-height: 1.4; }
+.cfg-tag .tag { max-width: 40%; }
+.cfg-acentos { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ac { width: 26px; height: 26px; flex: none; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--encab-borde); padding: 0; }
+.ac.on { box-shadow: 0 0 0 2px var(--texto); }
+.ac.sw-verde { background: #1E7B4F; } .ac.sw-azul { background: #1A5FB4; } .ac.sw-violeta { background: #6B3FA0; }
+.ac.sw-naranja { background: #B4580F; } .ac.sw-rojo { background: #B3261E; } .ac.sw-gris { background: #455A64; }
+/* Etiquetas en el panel (fondo claro): paleta clara */
+.config .tag.t0 { background: #D7F0E1; color: #155C38; } .config .tag.t1 { background: #D6E6FA; color: #1A4E8C; }
+.config .tag.t2 { background: #FBEFC9; color: #7A5800; } .config .tag.t3 { background: #FADBE5; color: #8E2348; }
+.config .tag.t4 { background: #E8DDF9; color: #5B2F99; } .config .tag.t5 { background: #D3F1F1; color: #0F5E60; }
+.config .tag.t6 { background: #FCE3CF; color: #8A4710; } .config .tag.t7 { background: #FAD9D9; color: #962525; }
+.config .tag.t8 { background: #E8F3CC; color: #4C6410; } .config .tag.t9 { background: #DDE2FA; color: #2E3C99; }
+.config .tag.t10 { background: #EFE3D8; color: #6B4A2E; } .config .tag.t11 { background: #E4E8EA; color: #3E4A50; }
