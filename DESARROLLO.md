@@ -32,6 +32,7 @@
   - **Administrador de ANote...:** «cerrar sesión en todos los dispositivos» (`control/{uid}.revokedAt`) también cierra Planillas (intenta subir lo pendiente, quita las planillas de la cuenta y avisa). Solo lee; no escribe nada de ANote....
   - **Reglas nuevas** en `firestore-planillas.rules` (reemplazan el bloque de la v0.0.10; ver sección 3). Arreglo importante: la lectura de una planilla que todavía no existe (`resource == null`) estaba rechazada en el bloque de la v0.0.10, y eso podía impedir la **primera subida** de cada planilla.
   - Pruebas: `pruebas/app/compartir.mjs` (61 puntos OK, tres cuentas) y el servidor de prueba ahora aplica una copia en JavaScript de las reglas; `nube.mjs`, `cuenta.mjs`, `edicion.mjs`, `reporte*.mjs` e `importar-exportar.mjs` siguen bien. Sin plugins nuevos.
+  - CI y APK a la primera. Con el paquete real del APK: abre sin errores, no carga la nube sin sesión y el módulo `nube-*.js` real se evalúa bien en Chrome. `grep` del APK: mismas cuentas que en la v0.0.10 (guía de dispositivos viejos del repo home: solo una línea en su Historial; mapa de apps al día).
 - En curso: el usuario reemplaza las reglas y prueba la v0.0.11 (sección 3, paso 1).
 
 ## 3. Próximos pasos
