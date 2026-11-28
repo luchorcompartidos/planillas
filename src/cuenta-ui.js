@@ -3,12 +3,15 @@
 // La cuenta es opcional: sin iniciar sesión la app funciona igual y las planillas quedan en el dispositivo.
 // Firebase (cuenta.js) se carga recién cuando hace falta: al tocar el botón, o al abrir la app si ya había
 // una sesión (marca CUENTA_KEY), así una app sin cuenta no carga nada de Firebase al arrancar.
+// Nube (v0.0.10): con la sesión iniciada se carga nube.js (Firestore) y las planillas de la cuenta se sincronizan.
 const CUENTA_KEY = 'planillas-cuenta'; // correo de la sesión abierta (solo para saber si cargar Firebase al abrir)
 
 let A = null; // módulo cuenta.js (cargado)
+let N = null; // módulo nube.js (cargado con la sesión iniciada)
 let user = null;
 let ready = false;
-let ui = null; // { $, esc, openDialog, closeDialog, snack, hideSnack }
+let ui = null; // { $, esc, openDialog, closeDialog, snack, hideSnack, nube: ayudas de main.js para nube.js }
+let leaving = false; // «Cerrar sesión» en curso (la nube ya se paró y limpió)
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* nada */ } };
@@ -25,10 +28,22 @@ async function load() {
       ready = true;
       lsSet(CUENTA_KEY, u ? (u.email || '?') : null);
       paintButton();
+      if (u) startNube(u); else if (N && !leaving) N.stop();
       if (first) { first = false; resolve(); }
     });
   });
   return A;
+}
+
+async function startNube(u) {
+  try {
+    if (!N) N = await import('./nube.js');
+    if (user && user.uid === u.uid) await N.start(u, ui.nube);
+  } catch (e) {
+    console.warn('Nube', e);
+    ui.snack('No se pudo conectar con la nube. Las planillas siguen en este dispositivo.');
+  }
+  if (ui.nube) ui.nube.status();
 }
 
 const shownName = (u) => (u.displayName || '').trim() || (u.email || '').split('@')[0];
@@ -94,7 +109,7 @@ function enterSubmits(f, btn) {
 }
 const focusFirst = (f) => { const i = f.querySelector('input:not([type="checkbox"])'); if (i) i.focus(); };
 
-const NOTA_CUENTA = '<p class="dialog-sub">Opcional. Es la misma cuenta de ANote... (con correo y contraseña). Sin iniciar sesión, Planillas anda igual y tus planillas quedan en este dispositivo; la nube llega en la próxima versión.</p>';
+const NOTA_CUENTA = '<p class="dialog-sub">Opcional. Es la misma cuenta de ANote... (con correo y contraseña). Con la sesión iniciada, tus planillas se guardan en tu cuenta y las ves en todos tus dispositivos. Sin iniciar sesión, Planillas anda igual y las planillas quedan solo en este dispositivo.</p>';
 
 // ---------- Entrar ----------
 function showLogin(email = lsGet('planillas-cuenta-ultimo') || '') {
@@ -184,12 +199,12 @@ async function showAccount({ created = false } = {}) {
   const u = user;
   const verif = u.emailVerified
     ? '<p class="cta-ok">✓ Correo verificado</p>'
-    : `<p class="cta-warn"><b>Falta verificar el correo.</b> ${created ? 'Te mandamos un correo' : 'Buscá el correo que te mandamos'} con el link (mirá también en spam). Hasta verificarlo no vas a poder compartir planillas ni ver las que te compartan (cuando llegue la nube).</p>
+    : `<p class="cta-warn"><b>Falta verificar el correo.</b> ${created ? 'Te mandamos un correo' : 'Buscá el correo que te mandamos'} con el link (mirá también en spam). Hasta verificarlo no vas a poder compartir planillas ni ver las que te compartan (cuando llegue compartir).</p>
        <div class="cta-links"><button class="text-btn" id="cta-verif-ok" type="button">Ya lo verifiqué</button><button class="text-btn" id="cta-verif-again" type="button">Reenviar el correo</button></div>`;
   const f = form(created ? 'Cuenta creada' : 'Mi cuenta', `
     <p class="cta-quien"><span class="avatar big">${ui.esc((shownName(u)[0] || '?').toUpperCase())}</span><span><b>${ui.esc(shownName(u))}</b><br><small>${ui.esc(u.email || '')}</small></span></p>
     ${verif}
-    <p class="dialog-sub">Tus planillas siguen guardadas en este dispositivo. Guardarlas en la nube y verlas en todos tus dispositivos llega en la próxima versión.</p>
+    <p class="dialog-sub">Las planillas de tu cuenta se guardan en la nube y las ves en todos tus dispositivos donde entres con esta cuenta (también sin conexión: los cambios se suben al volver). Las que están «Solo en este dispositivo» se suben desde Mis planillas (⋮ → Subir a mi cuenta).</p>
     <div class="cta-menu">
       <button class="menu-item" id="cta-name" type="button">Cambiar el nombre visible</button>
       ${A.hasPassword(u) ? '<button class="menu-item" id="cta-pw" type="button">Cambiar la contraseña</button>' : ''}
@@ -266,15 +281,24 @@ function showChangePw() {
   focusFirst(f);
 }
 
-function confirmSignOut() {
-  form('Cerrar sesión', `<p>¿Cerrar la sesión de <b>${ui.esc(user.email || '')}</b> en este dispositivo? Las planillas siguen guardadas acá.</p>
-    <div class="cta-acts"><button class="text-btn" id="cta-back" type="button">Volver</button><button class="cta-btn danger" id="cta-go" type="button">Cerrar sesión</button></div>`);
+async function confirmSignOut() {
+  const n = N ? await N.pending() : 0;
+  const aviso = n
+    ? `<p class="dialog-error">${n === 1 ? 'Hay 1 planilla con cambios que todavía no se subieron' : `Hay ${n} planillas con cambios que todavía no se subieron`} a la nube (¿sin conexión?). Si cerrás sesión ahora, esos cambios se pierden.</p>`
+    : '';
+  form('Cerrar sesión', `<p>¿Cerrar la sesión de <b>${ui.esc(user.email || '')}</b> en este dispositivo? Las planillas de tu cuenta se quitan de este dispositivo y siguen en la nube (vuelven al entrar de nuevo). Las que están solo en este dispositivo quedan.</p>${aviso}
+    <div class="cta-acts"><button class="text-btn" id="cta-back" type="button">Volver</button><button class="cta-btn danger" id="cta-go" type="button">${n ? 'Cerrar sesión igual' : 'Cerrar sesión'}</button></div>`);
   const go = ui.$('cta-go');
   go.addEventListener('click', () => busy(go, 'Cerrando…', async () => {
-    await A.signOutUser();
-    user = null; paintButton();
-    ui.closeDialog();
-    ui.snack('Sesión cerrada');
+    leaving = true;
+    try {
+      const ids = N ? await N.leave() : [];
+      await A.signOutUser();
+      user = null; paintButton();
+      ui.closeDialog();
+      if (ui.nube) await ui.nube.removedMany(ids);
+      ui.snack('Sesión cerrada');
+    } finally { leaving = false; }
   }));
   ui.$('cta-back').addEventListener('click', () => showAccount());
 }
@@ -313,3 +337,8 @@ export function initCuenta(helpers) {
 }
 
 export const cuentaUser = () => user;
+// Para main.js: estado de la nube (null sin sesión o sin nube cargada) y planillas nuevas que van a la cuenta.
+export const nubeInfo = () => (N && user ? N.info() : null);
+export const nubeAdopt = (id) => { if (N && user) N.adopt(id); };
+export const nubeIsAccount = (id) => !!(N && user && N.isAccount(id));
+export const nubeSyncNow = () => (N && user ? N.syncNow() : Promise.resolve());

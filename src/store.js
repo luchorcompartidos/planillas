@@ -2,13 +2,32 @@
 // si IndexedDB no está disponible (modo privado de algunos navegadores).
 // Archivo = { id, name, created, updated, rows, cols, cells: { "A1": "texto" }, styles, colW, rowH }
 // (styles/colW/rowH desde la v0.0.4: formato traído al importar .xlsx; detalle en transfer.js)
+// Nube (v0.0.10): las planillas de la cuenta también viven acá (copia de trabajo); cuáles son y si tienen
+// cambios sin subir lo lleva nube.js aparte (localStorage), no el archivo. Cada cambio hecho desde la app
+// avisa a nube.js (setStoreHooks) o, si la nube no está cargada, queda anotado en LS_CHANGED.
 
 const DB_NAME = 'planillas';
 const STORE = 'files';
 const LS_FALLBACK = 'planillas-archivos-v1';
 const LS_PENDING = 'planillas-pendiente'; // copia sincrónica al salir de la app (IndexedDB es asíncrono)
 
+const LS_CHANGED = 'planillas-cambios'; // ids cambiados sin la nube cargada (nube.js los toma al arrancar)
+
 let dbPromise = null;
+let hooks = null; // { put(file), del(id) } de nube.js
+
+export function setStoreHooks(h) { hooks = h || null; }
+function markChanged(id) {
+  try {
+    const set = JSON.parse(localStorage.getItem(LS_CHANGED) || '[]');
+    if (!set.includes(id)) { set.push(id); localStorage.setItem(LS_CHANGED, JSON.stringify(set)); }
+  } catch { /* sin lugar */ }
+}
+export function takeChanged() {
+  let set = [];
+  try { set = JSON.parse(localStorage.getItem(LS_CHANGED) || '[]'); localStorage.removeItem(LS_CHANGED); } catch { set = []; }
+  return Array.isArray(set) ? set : [];
+}
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -63,16 +82,19 @@ export async function getFile(id) {
   return lsAll()[id] || null;
 }
 
-export async function putFile(file) {
+// fromCloud = true: lo escribe nube.js con lo bajado de la nube (no cuenta como cambio para subir)
+export async function putFile(file, fromCloud = false) {
   const db = await openDb();
-  if (db) { await tx(db, 'readwrite', (st) => st.put(file)); return; }
-  const all = lsAll(); all[file.id] = file; lsWrite(all);
+  if (db) await tx(db, 'readwrite', (st) => st.put(file));
+  else { const all = lsAll(); all[file.id] = file; lsWrite(all); }
+  if (!fromCloud) { if (hooks) hooks.put(file); else markChanged(file.id); }
 }
 
-export async function deleteFile(id) {
+export async function deleteFile(id, fromCloud = false) {
   const db = await openDb();
-  if (db) { await tx(db, 'readwrite', (st) => st.delete(id)); return; }
-  const all = lsAll(); delete all[id]; lsWrite(all);
+  if (db) await tx(db, 'readwrite', (st) => st.delete(id));
+  else { const all = lsAll(); delete all[id]; lsWrite(all); }
+  if (!fromCloud && hooks) hooks.del(id);
 }
 
 export function newId() {

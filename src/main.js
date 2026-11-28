@@ -22,7 +22,7 @@ import {
   initNative, isNative, setStatusBar, minimizeApp, deviceInfo, deliverFile, clipboardWrite, clipboardRead,
 } from './native.js';
 import { colName, parseRef, ref, isNum } from './refs.js';
-import { initCuenta, cuentaUser } from './cuenta-ui.js';
+import { initCuenta, cuentaUser, nubeInfo, nubeAdopt, nubeIsAccount } from './cuenta-ui.js';
 import { importAny, ImportError, toXlsx, toCsv, safeName, toNumber } from './transfer.js';
 import {
   listFiles, getFile, putFile, deleteFile, newId, savePending, clearPending, recoverPending, storageKind,
@@ -349,7 +349,8 @@ function commit() {
   if (!editing) return;
   editing = false;
   hideEditor();
-  setCell(sel.r, sel.c, formula.value);
+  // Sin cambios no se guarda (no cambia la fecha ni cuenta como cambio para la nube, v0.0.10)
+  if (formula.value !== original || formula.value !== getCell(sel.r, sel.c)) setCell(sel.r, sel.c, formula.value);
   paintCell(sel.r, sel.c);
   paintSelection();
 }
@@ -1580,16 +1581,24 @@ function nextName(files) {
   while (used.has(`Planilla ${i}`)) i++;
   return `Planilla ${i}`;
 }
+function normalize(f) {
+  f.cells = f.cells || {};
+  f.styles = f.styles || {};
+  f.colW = f.colW || {};
+  f.rowH = f.rowH || {};
+  f.rows = Math.max(f.rows || 0, MIN_ROWS);
+  f.cols = Math.max(f.cols || 0, MIN_COLS);
+  return f;
+}
+// Archivo nuevo (nueva, duplicar, importar): con la sesión iniciada va a la cuenta (v0.0.10)
+async function addFile(f) {
+  nubeAdopt(f.id);
+  await putFile(f);
+}
 async function openFile(f) {
   commit();
   if (sheet && f.id !== sheet.id) await flushNow();
-  sheet = f;
-  sheet.cells = sheet.cells || {};
-  sheet.styles = sheet.styles || {};
-  sheet.colW = sheet.colW || {};
-  sheet.rowH = sheet.rowH || {};
-  sheet.rows = Math.max(sheet.rows || 0, MIN_ROWS);
-  sheet.cols = Math.max(sheet.cols || 0, MIN_COLS);
+  sheet = normalize(f);
   sel = { r: 0, c: 0 }; far = { r: 0, c: 0 }; rec = 1; undoSnap = null; repPos = null;
   closeConfig();
   if (view === 'tabla') commit();
@@ -1604,16 +1613,42 @@ async function openFile(f) {
 async function showFiles() {
   commit();
   await flushNow();
-  const files = await listFiles();
-  const list = $('file-list');
-  list.innerHTML = files.map((f) => {
-    const n = Object.keys(f.cells || {}).length;
-    return `<li class="file-item${sheet && f.id === sheet.id ? ' current' : ''}" data-id="${esc(f.id)}">
-      <button class="file-open" type="button"><b>${esc(f.name)}</b><small>${esc(formatDate(f.updated))} · ${n} ${n === 1 ? 'celda' : 'celdas'} con datos${sheet && f.id === sheet.id ? ' · abierta' : ''}</small></button>
-      <button class="icon-btn file-more" type="button" aria-label="Opciones de ${esc(f.name)}">⋮</button></li>`;
-  }).join('');
-  $('files-note').textContent = `Guardadas en este dispositivo (${await storageKind()}). Con "Importar" se traen archivos .xlsx o .csv (cada uno queda como planilla nueva). ${cuentaUser() ? `Sesión iniciada: ${cuentaUser().email}. ` : ''}La nube (guardar en tu cuenta y ver en todos tus dispositivos) llega en la próxima versión.`;
+  await renderFiles();
   $('files').hidden = false;
+}
+// Lista de Mis planillas. Con la sesión iniciada: "En tu cuenta" y "Solo en este dispositivo" (v0.0.10).
+async function renderFiles() {
+  const files = await listFiles();
+  const info = nubeInfo();
+  const item = (f) => {
+    const n = Object.keys(f.cells || {}).length;
+    const nube = info && info.ids.has(f.id) ? (info.dirty.has(f.id) ? ' · <span class="nube-pend">sin subir</span>' : ' · en la nube') : '';
+    return `<li class="file-item${sheet && f.id === sheet.id ? ' current' : ''}" data-id="${esc(f.id)}">
+      <button class="file-open" type="button"><b>${esc(f.name)}</b><small>${esc(formatDate(f.updated))} · ${n} ${n === 1 ? 'celda' : 'celdas'} con datos${sheet && f.id === sheet.id ? ' · abierta' : ''}${nube}</small></button>
+      <button class="icon-btn file-more" type="button" aria-label="Opciones de ${esc(f.name)}">⋮</button></li>`;
+  };
+  const user = cuentaUser();
+  let html;
+  if (info) {
+    const mine = files.filter((f) => info.ids.has(f.id));
+    const here = files.filter((f) => !info.ids.has(f.id));
+    html = `<li class="file-sec">En tu cuenta</li>${mine.map(item).join('') || `<li class="file-empty">${info.synced ? 'Todavía no hay planillas en tu cuenta.' : 'Conectando con la nube…'}</li>`}`;
+    if (here.length) html += `<li class="file-sec">Solo en este dispositivo</li>${here.map(item).join('')}`;
+  } else html = files.map(item).join('');
+  $('file-list').innerHTML = html;
+  let note;
+  if (info) {
+    const pend = info.dirty.size;
+    const estado = info.error || (pend
+      ? (info.offline ? `Sin conexión: ${pend === 1 ? '1 planilla con cambios sin subir' : `${pend} planillas con cambios sin subir`} (se suben al volver la conexión).` : `Subiendo ${pend === 1 ? '1 planilla' : `${pend} planillas`}…`)
+      : (info.synced ? 'Todo al día en la nube.' : 'Conectando con la nube…'));
+    note = `Sesión: ${user.email}. ${estado} Las planillas nuevas e importadas se guardan en tu cuenta. Con "Importar" se traen archivos .xlsx o .csv.`;
+  } else if (user) {
+    note = `Sesión: ${user.email}. Conectando con la nube… Con "Importar" se traen archivos .xlsx o .csv.`;
+  } else {
+    note = `Guardadas en este dispositivo (${await storageKind()}). Iniciá sesión (botón de persona, arriba) para guardarlas en tu cuenta y verlas en todos tus dispositivos. Con "Importar" se traen archivos .xlsx o .csv (cada uno queda como planilla nueva).`;
+  }
+  $('files-note').textContent = note;
   showFiles.list = files;
 }
 function hideFiles() { $('files').hidden = true; }
@@ -1625,7 +1660,7 @@ $('files-new').addEventListener('click', async () => {
   const name = await ask({ title: 'Planilla nueva', text: 'Nombre:', input: nextName(files), ok: 'Crear' });
   if (name == null) return;
   const f = blankFile(name.trim() || nextName(files));
-  await putFile(f);
+  await addFile(f);
   hideFiles();
   await openFile(f);
 });
@@ -1644,6 +1679,7 @@ function fileMenu(f) {
     { label: 'Abrir', fn: async () => { hideFiles(); if (f.id !== sheet.id) await openFile(await getFile(f.id) || f); } },
     { label: 'Renombrar', fn: () => renameFile(f) },
     { label: 'Duplicar', fn: () => duplicateFile(f) },
+    ...(nubeInfo() && !nubeIsAccount(f.id) ? [{ label: 'Subir a mi cuenta', fn: () => uploadFile(f) }] : []),
     '-',
     ...EXPORTS.map((x) => ({ label: x.label, fn: () => exportFile(f, x.kind) })),
     '-',
@@ -1668,19 +1704,25 @@ async function duplicateFile(f) {
   let i = 2;
   while (files.some((x) => x.name === name)) name = `${full.name} (copia ${i++})`;
   const now = Date.now();
-  await putFile({ ...JSON.parse(JSON.stringify(full)), id: newId(), name, created: now, updated: now });
+  await addFile({ ...JSON.parse(JSON.stringify(full)), id: newId(), name, created: now, updated: now });
   await showFiles();
   snack(`Copia creada: ${name}`);
 }
+function uploadFile(f) {
+  nubeAdopt(f.id);
+  renderFiles();
+  snack(`"${f.name}" se sube a tu cuenta`);
+}
 async function removeFile(f) {
-  const ok = await ask({ title: `¿Borrar "${f.name}"?`, text: 'Se borra de este dispositivo. No se puede deshacer.', ok: 'Borrar', danger: true });
+  const text = nubeIsAccount(f.id) ? 'Se borra de tu cuenta y de todos tus dispositivos. No se puede deshacer.' : 'Se borra de este dispositivo. No se puede deshacer.';
+  const ok = await ask({ title: `¿Borrar "${f.name}"?`, text, ok: 'Borrar', danger: true });
   if (!ok) return;
   if (sheet && f.id === sheet.id) { clearTimeout(saveTimer); dirty = false; await saving; }
   await deleteFile(f.id);
   if (sheet && f.id === sheet.id) {
     const rest = await listFiles();
     const next = rest[0] || blankFile(nextName(rest));
-    if (!rest.length) await putFile(next);
+    if (!rest.length) await addFile(next);
     sheet = null;
     await openFile(next);
   }
@@ -1744,7 +1786,7 @@ async function importFiles(list) {
           cells: x.cells, styles: x.styles, colW: x.colW, rowH: x.rowH,
           rows: Math.max(x.rows, MIN_ROWS), cols: Math.max(x.cols, MIN_COLS), view: 'reporte',
         });
-        await putFile(f);
+        await addFile(f);
         created.push(f);
         big = Math.max(big, f.rows * f.cols);
       }
@@ -1846,11 +1888,11 @@ function closeDialog(value = null) {
   }
 }
 // Pregunta con botones propios (sin confirm/prompt del navegador). Devuelve el texto, true o null.
-function ask({ title, text = '', input, ok = 'Aceptar', danger = false }) {
+function ask({ title, text = '', input, ok = 'Aceptar', danger = false, cancel = 'Cancelar' }) {
   if (dialogDone) closeDialog();
   return new Promise((resolve) => {
     openDialog(title, `${text ? `<p>${esc(text)}</p>` : ''}${input != null ? `<input id="dialog-input" class="dialog-input" type="text" value="${esc(input)}" autocomplete="off" enterkeyhint="done">` : ''}`,
-      [{ label: 'Cancelar', value: null }, { label: ok, value: 'ok', danger }]);
+      [{ label: cancel, value: null }, { label: ok, value: 'ok', danger }]);
     dialogDone = resolve;
     const inp = $('dialog-input');
     if (inp) {
@@ -1883,13 +1925,13 @@ function showVersion() {
   const r = release;
   const dev = deviceInfo();
   openDialog(`Planillas v${APP_VERSION}`, `
-    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 2a)</p>
+    <p>${isNative ? 'App Android' : 'Versión web'} · prueba de concepto (Etapa 2b-1)</p>
     <p>Fecha de la versión: ${r && r.tag === `v${APP_VERSION}` ? esc(formatDate(r.fileDate)) : 'sin datos'}</p>
     ${r && isNewer(r.tag) ? `<p><b>Hay una versión nueva: ${esc(r.tag)}</b></p>` : ''}
     ${dev ? `<p>Equipo: ${esc(dev)}</p>` : ''}
     <p><a href="${CHANGELOG_URL}" target="_blank" rel="noopener">Changelog (Releases en GitHub)</a></p>
     <p>Cuenta: ${cuentaUser() ? `sesión iniciada (${esc(cuentaUser().email || '')})` : 'sin iniciar sesión (opcional)'}</p>
-    <p style="color:#5F6368">Las planillas de esta versión quedan solo en este dispositivo (la nube llega en la próxima).</p>`);
+    <p style="color:#5F6368">${cuentaUser() ? 'Las planillas de tu cuenta se guardan en la nube y se ven en todos tus dispositivos (si cambia la misma en dos lados a la vez, lo de este dispositivo queda en una copia).' : 'Sin sesión, las planillas quedan solo en este dispositivo.'}</p>`);
 }
 $('btn-version').addEventListener('click', showVersion);
 
@@ -1930,8 +1972,59 @@ async function start() {
   if (!f) f = await firstFile();
   await openFile(f);
 }
+// ---------- Nube (v0.0.10): lo que nube.js le pide a la app ----------
+async function reloadOpen() {
+  const f = await getFile(sheet.id);
+  if (!f) return;
+  const top = wrap.scrollTop; const left = wrap.scrollLeft;
+  f.view = sheet.view;
+  sheet = normalize(f);
+  undoSnap = null;
+  refresh();
+  wrap.scrollTop = top; wrap.scrollLeft = left;
+}
+async function openOther(msg) {
+  clearTimeout(saveTimer); dirty = false;
+  await saving;
+  const rest = await listFiles();
+  const next = rest[0] || blankFile(nextName(rest));
+  if (!rest.length) await addFile(next);
+  sheet = null;
+  await openFile(next);
+  if (msg) snack(msg);
+}
+const filesOpen = () => !$('files').hidden;
+const nubeHooks = {
+  flush: async () => { commit(); await flushNow(); },
+  askUpload: async (n) => {
+    // Espera a que no haya otro diálogo abierto (por ejemplo, el de «Iniciar sesión» o «Mi cuenta»)
+    for (let i = 0; i < 2; i++) { while (!$('dialog').hidden) await new Promise((r) => setTimeout(r, 400)); await new Promise((r) => setTimeout(r, 700)); }
+    const ok = await ask({
+      title: 'Subir a tu cuenta',
+      text: `${n === 1 ? 'Tenés 1 planilla guardada' : `Tenés ${n} planillas guardadas`} solo en este dispositivo. ¿${n === 1 ? 'Subirla' : 'Subirlas'} a tu cuenta, para verlas en todos tus dispositivos? Si no, quedan acá y podés subirlas después, de a una, desde Mis planillas (⋮ → Subir a mi cuenta).`,
+      ok: n === 1 ? 'Subirla' : 'Subirlas', cancel: 'Ahora no',
+    });
+    return !!ok;
+  },
+  remoteChanged: async (id) => {
+    if (sheet && sheet.id === id) { await reloadOpen(); snack(`"${sheet.name}" se actualizó con cambios de otro dispositivo`); }
+    if (filesOpen()) await renderFiles();
+  },
+  remoteDeleted: async (id) => {
+    if (sheet && sheet.id === id) await openOther(`"${sheet.name}" se borró en otro dispositivo`);
+    if (filesOpen()) await renderFiles();
+  },
+  removedMany: async (ids) => {
+    if (sheet && ids.includes(sheet.id)) await openOther();
+    if (filesOpen()) await renderFiles();
+  },
+  conflict: (name, copy) => snack(`"${name}" cambió también en otro dispositivo: lo de acá quedó en "${copy}"`),
+  error: (text) => snack(text),
+  status: () => { if (filesOpen()) renderFiles(); },
+};
+
 start();
-initCuenta({ $, esc, openDialog, closeDialog, snack, hideSnack });
+initCuenta({ $, esc, openDialog, closeDialog, snack, hideSnack, nube: nubeHooks });
 checkUpdate();
 if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

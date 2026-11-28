@@ -114,10 +114,10 @@ check('«Cerrar» cierra el diálogo', !(await dialogOpen()));
 
 // 6. Mis planillas y versión
 await tap('#btn-files');
-check('Mis planillas: dice la sesión', (await txt('#files-note')).includes(`Sesión iniciada: ${MAIL}`));
+check('Mis planillas: dice la sesión', (await txt('#files-note')).includes(`Sesión: ${MAIL}`));
 await tap('#files-close');
 await tap('#btn-version');
-check('Versión: dice la cuenta y la Etapa 2a', (await txt('#dialog-body')).includes(`sesión iniciada (${MAIL})`) && (await txt('#dialog-body')).includes('Etapa 2a'));
+check('Versión: dice la cuenta y la Etapa 2b-1', (await txt('#dialog-body')).includes(`sesión iniciada (${MAIL})`) && (await txt('#dialog-body')).includes('Etapa 2b-1'));
 await page.tap('#dialog-actions .text-btn'); await wait(200);
 
 // 7. Recargar: la sesión sigue

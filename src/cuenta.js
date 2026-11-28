@@ -1,7 +1,7 @@
 // Cuenta (Etapa 2a): inicio de sesión con correo y contraseña de Firebase, la misma cuenta de ANote...
 // (proyecto notas-pro-2026). Solo el SDK web de Firebase Auth: sin plugin nativo, así que anda igual en la web
 // y en el APK (también en Android 5, sin depender de Play services). Google llega en otro paso.
-// Esta etapa no escribe nada en Firestore (en particular, no toca directory/{uid} de ANote...).
+// Firestore (la nube de las planillas, desde la v0.0.10) está en nube.js; no se toca directory/{uid} de ANote....
 // Copiado y achicado de src/firebase.js del repo notas.
 import { initializeApp } from 'firebase/app';
 import {
@@ -12,11 +12,13 @@ import {
 import { firebaseConfig } from './firebase-config.js';
 
 let auth = null;
+let app = null;
+export const fbApp = () => { fbAuth(); return app; }; // para Firestore (nube.js)
 // Sin resolver de ventanas emergentes (no hace falta para correo y contraseña): no carga el iframe de
 // Firebase, que dentro del WebView del APK no anda. La sesión queda en IndexedDB (o localStorage).
 export function fbAuth() {
   if (!auth) {
-    const app = initializeApp(firebaseConfig);
+    app = initializeApp(firebaseConfig);
     auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
     auth.languageCode = 'es'; // correos de verificación y de recuperación en castellano
   }
